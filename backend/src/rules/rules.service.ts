@@ -18,7 +18,7 @@ export interface Condition {
   labelValue?: string;
   windowSize?: number;
   threshold?: number;
-  aggregate?: 'count' | 'sum' | 'avg';
+  aggregate?: 'count' | 'sum' | 'avg' | 'max' | 'min';
   eventA?: string;
   eventB?: string;
   interval?: number;
@@ -111,7 +111,7 @@ export class RulesService implements OnModuleInit {
     const now = Date.now();
     const windowSize = rule.windowSize * 1000;
     const windowKey = `${this.windowDataKey}${tenantId}:${rule.id}`;
-    
+
     const windowData = await this.redisService.zrangebyscore(
       windowKey,
       now - windowSize,
@@ -121,11 +121,11 @@ export class RulesService implements OnModuleInit {
     if (windowData.length > 0) {
       const condition = rule.conditions as RuleCondition;
       const windowCondition = condition.conditions.find(c => c.type === 'window');
-      
+
       if (windowCondition) {
         let result: number;
         const values = windowData.map(d => parseFloat(JSON.parse(d).value));
-        
+
         switch (windowCondition.aggregate) {
           case 'count':
             result = values.length;
@@ -136,17 +136,23 @@ export class RulesService implements OnModuleInit {
           case 'avg':
             result = values.reduce((a, b) => a + b, 0) / values.length;
             break;
+          case 'max':
+            result = Math.max(...values);
+            break;
+          case 'min':
+            result = Math.min(...values);
+            break;
           default:
             result = values.length;
         }
 
         if (this.compareValue(result, windowCondition.operator!, windowCondition.threshold!)) {
-          const labels = rule.groupByLabels?.length > 0 
+          const labels = rule.groupByLabels?.length > 0
             ? { rule: rule.name, ...this.extractGroupLabels(windowData, rule.groupByLabels) }
             : { rule: rule.name };
 
           const latestEvent = JSON.parse(windowData[windowData.length - 1]);
-          
+
           this.eventEmitter.emit('rule.triggered', {
             tenantId,
             rule,

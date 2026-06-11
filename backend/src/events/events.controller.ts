@@ -1,5 +1,5 @@
 import { Controller, Post, Body, Headers, Get, Param, Put, Delete } from '@nestjs/common';
-import { EventsService, WebhookEventDto, PrometheusWebhookDto, AgentMetricsDto } from './events.service';
+import { EventsService, WebhookEventDto, PrometheusWebhookDto, AgentMetricsDto, MetricEventDto } from './events.service';
 import { CurrentTenant } from '../common/decorators/tenant.decorator';
 import { EventSource } from './event-source.entity';
 import { AgentConfig } from './agent-config.entity';
@@ -113,5 +113,16 @@ export class EventsController {
   @ApiOperation({ summary: 'Get webhook URL and secret' })
   async getWebhookInfo(@CurrentTenant() tenantId: string): Promise<{ url: string; secret: string }> {
     return this.eventsService.getWebhookUrl(tenantId);
+  }
+
+  @ApiBearerAuth()
+  @Post('api/v1/events')
+  @ApiOperation({ summary: 'Receive metric event for rule matching' })
+  async receiveMetricEvent(
+    @CurrentTenant() tenantId: string,
+    @Body() dto: MetricEventDto,
+  ): Promise<{ eventId: string }> {
+    const eventId = await this.eventsService.receiveMetricEvent(tenantId, dto);
+    return { eventId };
   }
 }

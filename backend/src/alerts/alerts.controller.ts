@@ -33,6 +33,25 @@ export class AlertsController {
     });
   }
 
+  @Get('grouped')
+  @ApiOperation({ summary: 'Get alerts grouped by fingerprint' })
+  @ApiQuery({ name: 'status', required: false, isArray: true })
+  @ApiQuery({ name: 'severity', required: false, isArray: true })
+  async findAllGrouped(
+    @CurrentUser() ctx: TenantContext,
+    @Query('status') status?: string[],
+    @Query('severity') severity?: string[],
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    return this.alertsService.findAllGrouped(ctx.tenantId, {
+      status: status as AlertStatus[],
+      severity: severity as AlertSeverity[],
+      startDate: startDate ? new Date(startDate) : undefined,
+      endDate: endDate ? new Date(endDate) : undefined,
+    });
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get alert by ID' })
   async findOne(

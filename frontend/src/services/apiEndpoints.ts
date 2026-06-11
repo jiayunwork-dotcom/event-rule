@@ -105,15 +105,36 @@ export interface AlertTimeline {
   count: number;
 }
 
+export interface AlertGroup {
+  fingerprint: string;
+  name: string;
+  severity: 'info' | 'warning' | 'critical' | 'fatal';
+  labels: Record<string, string>;
+  alerts: Alert[];
+  count: number;
+  lastTriggeredAt: string;
+}
+
+export interface AlertHistoryItem {
+  id: string;
+  alertId: string;
+  oldStatus?: string;
+  newStatus: string;
+  operatorId?: string;
+  remark?: string;
+  createdAt: string;
+}
+
 export const alertsApi = {
   getAlerts: (params?: any) => api.get<Alert[]>('/api/v1/alerts', { params }),
+  getAlertsGrouped: (params?: any) => api.get<AlertGroup[]>('/api/v1/alerts/grouped', { params }),
   getAlert: (id: string) => api.get<Alert>(`/api/v1/alerts/${id}`),
-  getAlertHistory: (id: string) => api.get(`/api/v1/alerts/${id}/history`),
-  acknowledge: (id: string, remark?: string) => 
+  getAlertHistory: (id: string) => api.get<AlertHistoryItem[]>(`/api/v1/alerts/${id}/history`),
+  acknowledge: (id: string, remark?: string) =>
     api.post<Alert>(`/api/v1/alerts/${id}/acknowledge`, { remark }),
-  process: (id: string, remark?: string) => 
+  process: (id: string, remark?: string) =>
     api.post<Alert>(`/api/v1/alerts/${id}/process`, { remark }),
-  resolve: (id: string, remark?: string, resolvedReason?: string) => 
+  resolve: (id: string, remark?: string, resolvedReason?: string) =>
     api.post<Alert>(`/api/v1/alerts/${id}/resolve`, { remark, resolvedReason }),
 };
 
@@ -204,6 +225,8 @@ export const sourcesApi = {
   updateAgentConfig: (id: string, data: any) => api.put(`/api/v1/agent-configs/${id}`, data),
   deleteAgentConfig: (id: string) => api.delete(`/api/v1/agent-configs/${id}`),
   getWebhookInfo: () => api.get('/api/v1/webhook/info'),
+  sendMetricEvent: (data: { metric_name: string; value: number; labels?: Record<string, string>; timestamp?: string }) =>
+    api.post('/api/v1/events', data),
 };
 
 export const tenantsApi = {

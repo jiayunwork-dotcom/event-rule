@@ -48,6 +48,13 @@ export interface AgentMetricsDto {
   labels?: Record<string, string>;
 }
 
+export interface MetricEventDto {
+  metric_name: string;
+  value: number;
+  labels?: Record<string, string>;
+  timestamp?: string;
+}
+
 @Injectable()
 export class EventsService {
   private readonly logger = new Logger(EventsService.name);
@@ -224,5 +231,18 @@ export class EventsService {
       url: `/webhook/${tenant.apiKey}`,
       secret: tenant.webhookSecret,
     };
+  }
+
+  async receiveMetricEvent(tenantId: string, dto: MetricEventDto): Promise<string> {
+    const event: Omit<Event, 'id'> = {
+      source: 'metric-api',
+      timestamp: dto.timestamp ? new Date(dto.timestamp) : new Date(),
+      labels: dto.labels || {},
+      metricName: dto.metric_name,
+      value: dto.value,
+      severity: 'info',
+    };
+
+    return this.eventQueueService.enqueue(tenantId, event);
   }
 }

@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
@@ -12,7 +12,6 @@ import { Silence } from './silence.entity';
 import { InhibitRule } from './inhibit-rule.entity';
 import { RuleHit } from '../metrics/metric.entity';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { v4 as uuidv4 } from 'uuid';
 
 export interface UpdateAlertStatusDto {
   status: AlertStatus;
@@ -35,19 +34,9 @@ export interface CreateInhibitRuleDto {
   equalLabels: string[];
 }
 
-interface AggregationGroup {
-  fingerprint: string;
-  alerts: Alert[];
-  count: number;
-  windowStart: Date;
-}
-
 @Injectable()
-export class AlertsService implements OnModuleInit {
+export class AlertsService {
   private readonly logger = new Logger(AlertsService.name);
-  private readonly aggregationWindow = 5 * 60 * 1000;
-  private readonly aggregationKeyPrefix = 'alert:aggregation:';
-  private readonly pendingEscalationKey = 'alert:escalation:pending:';
 
   constructor(
     @InjectRepository(Alert)
@@ -63,20 +52,6 @@ export class AlertsService implements OnModuleInit {
     private readonly eventEmitter: EventEmitter2,
     private readonly redisService: RedisService,
   ) {}
-
-  onModuleInit() {
-    this.startAggregationProcessor();
-  }
-
-  private startAggregationProcessor() {
-    setInterval(async () => {
-      try {
-        await this.processAggregationWindows();
-      } catch (error) {
-        this.logger.error('Error processing aggregation windows', error);
-      }
-    }, 60000);
-  }
 
   @OnEvent('rule.triggered')
   async handleRuleTriggered(payload: { tenantId: string; rule: Rule; event: Event }) {
@@ -99,63 +74,30 @@ export class AlertsService implements OnModuleInit {
       return;
     }
 
-    const fingerprint = calculateFingerprint(rule.name, event.labels);
-    
-    const existingAlert = await this.alertRepository.findOne({
-      where: { tenantId, fingerprint, status: AlertStatus.RESOLVED },
-      order: { createdAt: 'DESC' },
+    const fingerprint = calculateFingerprint(rule.id, event.labels, rule.groupByLabels);
+
+    const activeAlerts = await this.alertRepository.find({
+      where: {
+        tenantId,
+        fingerprint,
+        status: In([AlertStatus.PENDING, AlertStatus.ACKNOWLEDGED, AlertStatus.PROCESSING]) as any,
+      },
     });
 
-    let alert: Alert;
-    
-    const aggregationKey = `${this.aggregationKeyPrefix}${tenantId}:${fingerprint}`;
-    const aggregationData = await this.redisService.get(aggregationKey);
-    
-    if (aggregationData) {
-      const aggregation: AggregationGroup = JSON.parse(aggregationData);
-      aggregation.count++;
-      aggregation.alerts.push(this.createAlertEntity(tenantId, rule, event, fingerprint));
-      
-      if (Date.now() - aggregation.windowStart.getTime() > this.aggregationWindow) {
-        alert = await this.createAggregatedAlert(tenantId, rule, event, fingerprint, aggregation);
-        await this.redisService.del(aggregationKey);
-      } else {
-        await this.redisService.set(aggregationKey, JSON.stringify(aggregation), 300);
-        return;
+    if (activeAlerts.length > 0) {
+      const targetAlert = activeAlerts[0];
+      targetAlert.count++;
+      targetAlert.lastTriggeredAt = new Date();
+      if (event.value !== undefined) {
+        targetAlert.value = event.value;
       }
-    } else {
-      const activeAlert = await this.alertRepository.findOne({
-        where: { 
-          tenantId, 
-          fingerprint, 
-          status: In([AlertStatus.PENDING, AlertStatus.ACKNOWLEDGED, AlertStatus.PROCESSING]) 
-        } as any,
-      });
-
-      if (activeAlert) {
-        activeAlert.count++;
-        activeAlert.lastTriggeredAt = new Date();
-        activeAlert.value = event.value;
-        alert = await this.alertRepository.save(activeAlert);
-        
-        this.eventEmitter.emit('alert.updated', { tenantId, alert, isNew: false });
-        return;
-      } else {
-        const newAggregation: AggregationGroup = {
-          fingerprint,
-          alerts: [],
-          count: 1,
-          windowStart: new Date(),
-        };
-        await this.redisService.set(aggregationKey, JSON.stringify(newAggregation), 300);
-        
-        alert = await this.createAlert(tenantId, rule, event, fingerprint);
-      }
+      const saved = await this.alertRepository.save(targetAlert);
+      this.eventEmitter.emit('alert.updated', { tenantId, alert: saved, isNew: false });
+      return;
     }
 
-    if (alert) {
-      this.eventEmitter.emit('alert.created', { tenantId, alert, event, isNew: true });
-    }
+    const alert = await this.createAlert(tenantId, rule, event, fingerprint);
+    this.eventEmitter.emit('alert.created', { tenantId, alert, event, isNew: true });
   }
 
   private createAlertEntity(tenantId: string, rule: Rule, event: Event, fingerprint: string): Alert {
@@ -181,48 +123,6 @@ export class AlertsService implements OnModuleInit {
     await this.recordAlertHistory(tenantId, saved.id, null, AlertStatus.PENDING, null, 'Alert created');
     
     return saved;
-  }
-
-  private async createAggregatedAlert(
-    tenantId: string, 
-    rule: Rule, 
-    event: Event, 
-    fingerprint: string,
-    aggregation: AggregationGroup
-  ): Promise<Alert> {
-    const alert = this.createAlertEntity(tenantId, rule, event, fingerprint);
-    alert.count = aggregation.count;
-    
-    const saved = await this.alertRepository.save(alert);
-    await this.recordAlertHistory(tenantId, saved.id, null, AlertStatus.PENDING, null, `Aggregated alert with ${aggregation.count} occurrences`);
-    
-    return saved;
-  }
-
-  private async processAggregationWindows() {
-    const keys = await this.redisService.scan(`${this.aggregationKeyPrefix}*`);
-    
-    for (const key of keys) {
-      const data = await this.redisService.get(key);
-      if (!data) continue;
-      
-      const aggregation: AggregationGroup = JSON.parse(data);
-      
-      if (Date.now() - aggregation.windowStart.getTime() > this.aggregationWindow) {
-        const [, tenantId] = key.replace(this.aggregationKeyPrefix, '').split(':');
-        
-        if (aggregation.count >= 1) {
-          const firstAlert = aggregation.alerts[0];
-          const rule = { id: firstAlert.ruleId, name: firstAlert.name, severity: firstAlert.severity } as Rule;
-          const event = { labels: firstAlert.labels, value: firstAlert.value } as Event;
-          
-          const alert = await this.createAggregatedAlert(tenantId, rule, event, aggregation.fingerprint, aggregation);
-          this.eventEmitter.emit('alert.created', { tenantId, alert, isNew: true, isAggregated: true, count: aggregation.count });
-        }
-        
-        await this.redisService.del(key);
-      }
-    }
   }
 
   private async isSilenced(tenantId: string, labels: Record<string, string>): Promise<boolean> {
@@ -336,20 +236,20 @@ export class AlertsService implements OnModuleInit {
   }
 
   private async resolveAlertByEvent(tenantId: string, rule: Rule, event: Event) {
-    const fingerprint = calculateFingerprint(rule.name, event.labels);
-    
-    const activeAlert = await this.alertRepository.findOne({
-      where: { 
-        tenantId, 
-        fingerprint, 
-        status: In([AlertStatus.PENDING, AlertStatus.ACKNOWLEDGED, AlertStatus.PROCESSING]) 
-      } as any,
+    const fingerprint = calculateFingerprint(rule.id, event.labels, rule.groupByLabels);
+
+    const activeAlerts = await this.alertRepository.find({
+      where: {
+        tenantId,
+        fingerprint,
+        status: In([AlertStatus.PENDING, AlertStatus.ACKNOWLEDGED, AlertStatus.PROCESSING]) as any,
+      },
     });
 
-    if (activeAlert) {
+    for (const activeAlert of activeAlerts) {
       await this.updateAlertStatus(
-        tenantId, 
-        activeAlert.id, 
+        tenantId,
+        activeAlert.id,
         { status: AlertStatus.RESOLVED, resolvedReason: 'Auto-resolved by resolved event' },
         null
       );
@@ -405,6 +305,67 @@ export class AlertsService implements OnModuleInit {
     return alerts;
   }
 
+  async findAllGrouped(tenantId: string, filters?: {
+    status?: AlertStatus[];
+    severity?: AlertSeverity[];
+    startDate?: Date;
+    endDate?: Date;
+  }): Promise<Array<{
+    fingerprint: string;
+    name: string;
+    severity: AlertSeverity;
+    labels: Record<string, string>;
+    alerts: Alert[];
+    count: number;
+    lastTriggeredAt: Date;
+  }>> {
+    const alerts = await this.findAll(tenantId, filters);
+
+    const groups = new Map<string, {
+      fingerprint: string;
+      name: string;
+      severity: AlertSeverity;
+      labels: Record<string, string>;
+      alerts: Alert[];
+      count: number;
+      lastTriggeredAt: Date;
+    }>();
+
+    for (const alert of alerts) {
+      if (!groups.has(alert.fingerprint)) {
+        groups.set(alert.fingerprint, {
+          fingerprint: alert.fingerprint,
+          name: alert.name,
+          severity: alert.severity,
+          labels: alert.labels || {},
+          alerts: [],
+          count: 0,
+          lastTriggeredAt: alert.lastTriggeredAt,
+        });
+      }
+      const group = groups.get(alert.fingerprint)!;
+      group.alerts.push(alert);
+      group.count += alert.count;
+      if (alert.lastTriggeredAt > group.lastTriggeredAt) {
+        group.lastTriggeredAt = alert.lastTriggeredAt;
+      }
+    }
+
+    const severityOrder: Record<string, number> = {
+      fatal: 1,
+      critical: 2,
+      warning: 3,
+      info: 4,
+    };
+
+    return Array.from(groups.values()).sort((a, b) => {
+      if (severityOrder[a.severity] !== severityOrder[b.severity]) {
+        return severityOrder[a.severity] - severityOrder[b.severity];
+      }
+      return b.lastTriggeredAt.getTime() - a.lastTriggeredAt.getTime();
+    });
+  }
+
   async findOne(tenantId: string, id: string): Promise<Alert> {
     const alert = await this.alertRepository.findOne({ where: { id, tenantId } });
     if (!alert) {
@@ -429,35 +390,40 @@ export class AlertsService implements OnModuleInit {
     const alert = await this.findOne(tenantId, alertId);
     const oldStatus = alert.status;
 
-    if (oldStatus === AlertStatus.RESOLVED) {
-      throw new BadRequestException('Cannot update resolved alert');
+    const validTransitions: Record<AlertStatus, AlertStatus[]> = {
+      [AlertStatus.PENDING]: [AlertStatus.ACKNOWLEDGED],
+      [AlertStatus.ACKNOWLEDGED]: [AlertStatus.PROCESSING],
+      [AlertStatus.PROCESSING]: [AlertStatus.RESOLVED],
+      [AlertStatus.RESOLVED]: [],
+    };
+
+    const allowedNext = validTransitions[oldStatus] || [];
+    if (!allowedNext.includes(dto.status)) {
+      throw new BadRequestException(
+        `Invalid status transition: ${oldStatus} -> ${dto.status}. ` +
+        `Allowed transitions: ${oldStatus} -> ${allowedNext.join(', ') || 'none'}`
+      );
     }
 
     switch (dto.status) {
       case AlertStatus.ACKNOWLEDGED:
-        if (oldStatus !== AlertStatus.PENDING) {
-          throw new BadRequestException('Can only acknowledge pending alerts');
-        }
         alert.acknowledgedAt = new Date();
         alert.acknowledgedBy = userId || undefined;
         break;
 
       case AlertStatus.PROCESSING:
-        if (oldStatus !== AlertStatus.ACKNOWLEDGED) {
-          throw new BadRequestException('Can only move to processing from acknowledged');
-        }
         alert.processingAt = new Date();
         alert.processingBy = userId || undefined;
         break;
 
       case AlertStatus.RESOLVED:
+        if (!dto.resolvedReason) {
+          throw new BadRequestException('Resolved reason is required');
+        }
         alert.resolvedAt = new Date();
         alert.resolvedBy = userId || undefined;
         alert.resolvedReason = dto.resolvedReason;
         break;
-
-      default:
-        throw new BadRequestException('Invalid status transition');
     }
 
     alert.status = dto.status;
@@ -470,50 +436,48 @@ export class AlertsService implements OnModuleInit {
     return saved;
   }
 
+  private readonly escalationIntervals = [15 * 60 * 1000, 30 * 60 * 1000, 60 * 60 * 1000];
+  private readonly maxEscalationLevel = 3;
+
   @Cron(CronExpression.EVERY_MINUTE)
   async handleAlertEscalation() {
-    const now = new Date();
-    
-    const pendingAlerts = await this.alertRepository
+    const now = Date.now();
+
+    const activeAlerts = await this.alertRepository
       .createQueryBuilder('alert')
-      .where('alert.status = :status', { status: AlertStatus.PENDING })
-      .andWhere('alert.firstTriggeredAt < :threshold', { 
-        threshold: new Date(now.getTime() - 30 * 60 * 1000) 
+      .where('alert.status IN (:...statuses)', {
+        statuses: [AlertStatus.PENDING, AlertStatus.ACKNOWLEDGED, AlertStatus.PROCESSING],
       })
-      .andWhere('alert.escalationLevel = :level', { level: 0 })
+      .andWhere('alert.escalationLevel < :maxLevel', { maxLevel: this.maxEscalationLevel })
       .getMany();
 
-    for (const alert of pendingAlerts) {
-      alert.escalationLevel = 1;
-      await this.alertRepository.save(alert);
-      
-      this.eventEmitter.emit('alert.escalated', { 
-        tenantId: alert.tenantId, 
-        alert, 
-        level: 1,
-        reason: 'Pending alert not acknowledged within 30 minutes'
-      });
-    }
+    for (const alert of activeAlerts) {
+      const nextLevel = alert.escalationLevel + 1;
+      if (nextLevel > this.maxEscalationLevel) continue;
 
-    const acknowledgedAlerts = await this.alertRepository
-      .createQueryBuilder('alert')
-      .where('alert.status = :status', { status: AlertStatus.ACKNOWLEDGED })
-      .andWhere('alert.acknowledgedAt < :threshold', { 
-        threshold: new Date(now.getTime() - 2 * 60 * 60 * 1000) 
-      })
-      .andWhere('alert.escalationLevel < :maxLevel', { maxLevel: 2 })
-      .getMany();
+      const interval = this.escalationIntervals[alert.escalationLevel];
+      if (!interval) continue;
 
-    for (const alert of acknowledgedAlerts) {
-      alert.escalationLevel = 2;
-      await this.alertRepository.save(alert);
-      
-      this.eventEmitter.emit('alert.escalated', { 
-        tenantId: alert.tenantId, 
-        alert, 
-        level: 2,
-        reason: 'Acknowledged alert not processed within 2 hours'
-      });
+      let referenceTime: Date;
+      if (alert.escalationLevel === 0) {
+        referenceTime = alert.firstTriggeredAt;
+      } else if (alert.escalationLevel === 1) {
+        referenceTime = alert.acknowledgedAt || alert.firstTriggeredAt;
+      } else {
+        referenceTime = alert.processingAt || alert.acknowledgedAt || alert.firstTriggeredAt;
+      }
+
+      if (now - referenceTime.getTime() >= interval) {
+        alert.escalationLevel = nextLevel;
+        await this.alertRepository.save(alert);
+
+        this.eventEmitter.emit('alert.escalated', {
+          tenantId: alert.tenantId,
+          alert,
+          level: nextLevel,
+          reason: `Alert not handled within ${Math.round(interval / 60000)} minutes at level ${alert.escalationLevel - 1}`,
+        });
+      }
     }
   }
 
