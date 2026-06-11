@@ -54,7 +54,14 @@ export class TenantMiddleware implements NestMiddleware {
       return next();
     }
 
-    if (path.startsWith('/api/v1/auth/login') || path.startsWith('/health') || path.startsWith('/api/docs')) {
+    if (
+      path.startsWith('/api/v1/auth/login') || 
+      path.startsWith('/health') || 
+      path.startsWith('/api/docs') ||
+      path.startsWith('/api/swagger-ui') ||
+      path.startsWith('/api/json') ||
+      path.startsWith('/api/yaml')
+    ) {
       return next();
     }
 

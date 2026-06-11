@@ -56,12 +56,13 @@
 
 <script setup lang="ts">
 import { ref, reactive } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import { ElMessage, FormInstance, FormRules } from 'element-plus';
 import { useAuthStore } from '@/stores/auth';
 import { User, Lock, Promotion } from '@element-plus/icons-vue';
 
 const router = useRouter();
+const route = useRoute();
 const authStore = useAuthStore();
 const formRef = ref<FormInstance>();
 const loading = ref(false);
@@ -86,7 +87,8 @@ async function handleLogin() {
     await authStore.login(form.username, form.password);
     
     ElMessage.success('登录成功');
-    router.push('/dashboard');
+    const redirect = route.query.redirect as string;
+    router.push(redirect || '/dashboard');
   } catch (error) {
     console.error('Login error:', error);
   } finally {

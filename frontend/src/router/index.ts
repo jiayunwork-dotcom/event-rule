@@ -1,5 +1,4 @@
 import { createRouter, createWebHistory, RouteRecordRaw } from 'vue-router';
-import { useAuthStore } from '@/stores/auth';
 
 const routes: RouteRecordRaw[] = [
   {
@@ -101,12 +100,17 @@ const router = createRouter({
   routes,
 });
 
+const getToken = (): string | null => {
+  return localStorage.getItem('token');
+};
+
 router.beforeEach((to, from, next) => {
-  const authStore = useAuthStore();
-  
-  if (to.meta.requiresAuth && !authStore.isAuthenticated) {
-    next('/login');
-  } else if (to.path === '/login' && authStore.isAuthenticated) {
+  const token = getToken();
+  const requiresAuth = to.matched.some(record => record.meta.requiresAuth !== false);
+
+  if (requiresAuth && !token) {
+    next({ path: '/login', query: { redirect: to.fullPath } });
+  } else if (to.path === '/login' && token) {
     next('/dashboard');
   } else {
     next();
