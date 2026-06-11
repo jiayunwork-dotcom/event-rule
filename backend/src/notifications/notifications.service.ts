@@ -8,7 +8,8 @@ import { NotificationChannel, ChannelType } from './notification-channel.entity'
 import { Notification, NotificationStatus } from './notification.entity';
 import { DeadLetter } from './dead-letter.entity';
 import { NotificationPolicy } from '../schedules/schedule.entity';
-import { Alert, AlertSeverity } from '../rules/rule.entity';
+import { Alert } from '../alerts/alert.entity';
+import { AlertSeverity } from '../rules/rule.entity';
 import * as nodemailer from 'nodemailer';
 import axios from 'axios';
 
@@ -94,6 +95,7 @@ export class NotificationsService implements OnModuleInit {
     }
 
     await this.sendAlertNotifications(tenantId, alert, {
+      alert,
       isNew,
       isAggregated,
       count,
@@ -110,6 +112,7 @@ export class NotificationsService implements OnModuleInit {
     const { tenantId, alert, level } = payload;
     
     await this.sendAlertNotifications(tenantId, alert, {
+      alert,
       escalationLevel: level,
     });
   }
@@ -254,7 +257,7 @@ export class NotificationsService implements OnModuleInit {
     if (alert.labels) {
       for (const [key, value] of Object.entries(alert.labels)) {
         const regex = new RegExp(`{{\\s*labels\\.${key}\\s*}}`, 'g');
-        result = result.replace(regex, value);
+        result = result.replace(regex, String(value));
       }
 
       const labelsRegex = new RegExp(`{{\\s*labels\\s*}}`, 'g');

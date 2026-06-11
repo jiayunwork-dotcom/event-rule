@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between } from 'typeorm';
-import { Alert, AlertStatus, AlertSeverity } from '../rules/rule.entity';
+import { Alert } from '../alerts/alert.entity';
+import { AlertStatus, AlertSeverity } from '../rules/rule.entity';
 import { RuleHit } from '../metrics/metric.entity';
 import { Rule } from '../rules/rule.entity';
 import { Notification } from '../notifications/notification.entity';

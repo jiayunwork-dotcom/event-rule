@@ -3,7 +3,7 @@ import { Request, Response, NextFunction } from 'express';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Tenant } from '../tenants/tenant.entity';
+import { Tenant } from '../../tenants/tenant.entity';
 
 @Injectable()
 export class TenantMiddleware implements NestMiddleware {

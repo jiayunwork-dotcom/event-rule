@@ -1,6 +1,8 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, Query } from '@nestjs/common';
 import { AlertsService, UpdateAlertStatusDto, CreateSilenceDto, CreateInhibitRuleDto } from './alerts.service';
-import { Alert, AlertHistory, AlertStatus, AlertSeverity } from '../rules/rule.entity';
+import { Alert } from './alert.entity';
+import { AlertHistory } from './alert-history.entity';
+import { AlertStatus, AlertSeverity } from '../rules/rule.entity';
 import { Silence } from './silence.entity';
 import { InhibitRule } from './inhibit-rule.entity';
 import { CurrentUser, TenantContext } from '../common/decorators/tenant.decorator';

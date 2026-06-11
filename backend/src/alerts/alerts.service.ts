@@ -1,9 +1,10 @@
 import { Injectable, Logger, BadRequestException, OnModuleInit } from '@nestjs/common';
-import { InjectRepository, In } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository, In } from 'typeorm';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { Alert } from './alert.entity';
-import { AlertHistory, AlertStatus } from '../rules/rule.entity';
+import { AlertHistory } from './alert-history.entity';
+import { AlertStatus } from '../rules/rule.entity';
 import { Rule, AlertSeverity } from '../rules/rule.entity';
 import { Event, calculateFingerprint } from '../common/types/event.type';
 import { RedisService } from '../common/services/redis.service';
