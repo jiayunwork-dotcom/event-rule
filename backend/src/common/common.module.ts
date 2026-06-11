@@ -1,12 +1,27 @@
 import { Module, Global } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { JwtModule } from '@nestjs/jwt';
 import Redis from 'ioredis';
+import { Tenant } from '../tenants/tenant.entity';
 import { RedisService } from './services/redis.service';
 import { EventQueueService } from './services/event-queue.service';
+import { AuthGuard } from './guards/auth.guard';
 
 @Global()
 @Module({
-  imports: [ConfigModule],
+  imports: [
+    ConfigModule,
+    TypeOrmModule.forFeature([Tenant]),
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      useFactory: (configService: ConfigService) => ({
+        secret: configService.get('JWT_SECRET', 'your-secret-key'),
+        signOptions: { expiresIn: '24h' },
+      }),
+      inject: [ConfigService],
+    }),
+  ],
   providers: [
     {
       provide: 'REDIS_CLIENT',
@@ -20,7 +35,8 @@ import { EventQueueService } from './services/event-queue.service';
     },
     RedisService,
     EventQueueService,
+    AuthGuard,
   ],
-  exports: [RedisService, EventQueueService],
+  exports: [RedisService, EventQueueService, AuthGuard, JwtModule],
 })
 export class CommonModule {}

@@ -1,11 +1,12 @@
-import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ScheduleModule } from '@nestjs/schedule';
+import { APP_GUARD } from '@nestjs/core';
 import { typeOrmConfig } from './config/typeorm.config';
 import { CommonModule } from './common/common.module';
-import { TenantMiddleware } from './common/middleware/tenant.middleware';
+import { AuthGuard } from './common/guards/auth.guard';
 import { TenantsModule } from './tenants/tenants.module';
 import { AuthModule } from './auth/auth.module';
 import { EventsModule } from './events/events.module';
@@ -42,11 +43,11 @@ import { DashboardModule } from './dashboard/dashboard.module';
     SchedulesModule,
     DashboardModule,
   ],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useExisting: AuthGuard,
+    },
+  ],
 })
-export class AppModule implements NestModule {
-  configure(consumer: MiddlewareConsumer) {
-    consumer
-      .apply(TenantMiddleware)
-      .forRoutes('*');
-  }
-}
+export class AppModule {}

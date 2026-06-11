@@ -4,9 +4,15 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../users/user.entity';
 import * as bcrypt from 'bcrypt';
+import { IsString, IsNotEmpty } from 'class-validator';
 
-export interface LoginDto {
+export class LoginDto {
+  @IsString()
+  @IsNotEmpty()
   username: string;
+
+  @IsString()
+  @IsNotEmpty()
   password: string;
 }
 

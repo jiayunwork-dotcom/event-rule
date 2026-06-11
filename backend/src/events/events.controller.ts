@@ -1,17 +1,19 @@
-import { Controller, Post, Body, Headers, Get, Param, Put, Delete, UseGuards } from '@nestjs/common';
+import { Controller, Post, Body, Headers, Get, Param, Put, Delete } from '@nestjs/common';
 import { EventsService, WebhookEventDto, PrometheusWebhookDto, AgentMetricsDto } from './events.service';
 import { CurrentTenant } from '../common/decorators/tenant.decorator';
 import { EventSource } from './event-source.entity';
 import { AgentConfig } from './agent-config.entity';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiKeyAuth } from '../common/decorators/api-key.decorator';
 
 @ApiTags('events')
 @Controller()
 export class EventsController {
   constructor(private readonly eventsService: EventsService) {}
 
+  @ApiKeyAuth()
   @Post('webhook/:apiKey')
-  @ApiOperation({ summary: 'Receive events via webhook (no auth required, uses API key in URL)' })
+  @ApiOperation({ summary: 'Receive events via webhook (uses API key in URL)' })
   async receiveWebhook(
     @Param('apiKey') apiKey: string,
     @Body() eventDto: WebhookEventDto,
@@ -25,6 +27,7 @@ export class EventsController {
     return { eventId };
   }
 
+  @ApiKeyAuth()
   @Post('webhook/:apiKey/prometheus')
   @ApiOperation({ summary: 'Receive Prometheus AlertManager alerts' })
   async receivePrometheus(
@@ -93,6 +96,7 @@ export class EventsController {
     return this.eventsService.deleteAgentConfig(tenantId, id);
   }
 
+  @ApiKeyAuth()
   @Post('api/v1/agent/:id/metrics')
   @ApiOperation({ summary: 'Agent metrics endpoint' })
   async receiveAgentMetrics(
