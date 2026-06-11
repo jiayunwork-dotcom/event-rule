@@ -243,6 +243,12 @@ CREATE TABLE rule_templates (
 CREATE INDEX idx_rule_templates_tenant ON rule_templates(tenant_id);
 CREATE INDEX idx_rule_templates_type ON rule_templates(type);
 
+INSERT INTO tenants (id, name, api_key, webhook_secret) VALUES
+('00000000-0000-0000-0000-000000000001', 'Default Tenant', 'default-api-key-123', 'default-secret-456');
+
+INSERT INTO users (tenant_id, username, email, password_hash, role) VALUES
+('00000000-0000-0000-0000-000000000001', 'admin', 'admin@example.com', '$2b$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', 'admin');
+
 INSERT INTO rule_templates (id, type, name, description, severity, condition_type, conditions, priority, window_size, group_by_labels, scene_tags, suggested_threshold) VALUES
 ('00000000-0000-0000-0000-000000000010', 'system', 'CPU使用率告警', '当CPU使用率持续超过阈值时触发告警，适用于服务器资源监控', 'warning', 'window_aggregate', '{"operator": "AND", "conditions": [{"type": "window", "metric": "cpu_usage", "aggregate": "avg", "operator": "gt", "threshold": 80}]}', 1, 300, ARRAY['host']::VARCHAR[], ARRAY['基础设施', 'CPU', '资源监控']::VARCHAR[], '80%'),
 ('00000000-0000-0000-0000-000000000011', 'system', '内存使用率告警', '当内存使用率持续超过阈值时触发告警，适用于服务器资源监控', 'critical', 'window_aggregate', '{"operator": "AND", "conditions": [{"type": "window", "metric": "memory_usage", "aggregate": "avg", "operator": "gt", "threshold": 90}]}', 2, 180, ARRAY['host']::VARCHAR[], ARRAY['基础设施', '内存', '资源监控']::VARCHAR[], '90%'),
@@ -250,9 +256,3 @@ INSERT INTO rule_templates (id, type, name, description, severity, condition_typ
 ('00000000-0000-0000-0000-000000000013', 'system', '服务响应时间告警', '当服务P99响应时间超过阈值时触发告警，适用于应用性能监控', 'warning', 'window_aggregate', '{"operator": "AND", "conditions": [{"type": "window", "metric": "response_time_p99", "aggregate": "avg", "operator": "gt", "threshold": 2000}]}', 2, 300, ARRAY['service', 'endpoint']::VARCHAR[], ARRAY['应用性能', '响应时间', 'APM']::VARCHAR[], '2秒'),
 ('00000000-0000-0000-0000-000000000014', 'system', '错误率告警', '当5分钟窗口内错误率超过阈值时触发告警，适用于服务可用性监控', 'critical', 'window_aggregate', '{"operator": "AND", "conditions": [{"type": "window", "metric": "error_rate", "aggregate": "avg", "operator": "gt", "threshold": 5}]}', 3, 300, ARRAY['service']::VARCHAR[], ARRAY['应用性能', '错误率', '可用性']::VARCHAR[], '5%'),
 ('00000000-0000-0000-0000-000000000015', 'system', '服务宕机检测', '当心跳超时60秒时触发告警，适用于服务存活状态监控', 'fatal', 'frequency', '{"operator": "AND", "conditions": [{"type": "frequency", "windowSize": 60, "threshold": 0}]}', 5, 60, ARRAY['service', 'instance']::VARCHAR[], ARRAY['可用性', '心跳', '存活检测']::VARCHAR[], '心跳超时60秒');
-
-INSERT INTO tenants (id, name, api_key, webhook_secret) VALUES
-('00000000-0000-0000-0000-000000000001', 'Default Tenant', 'default-api-key-123', 'default-secret-456');
-
-INSERT INTO users (tenant_id, username, email, password_hash, role) VALUES
-('00000000-0000-0000-0000-000000000001', 'admin', 'admin@example.com', '$2b$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', 'admin');

@@ -24,10 +24,36 @@ export class DatabaseInitService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
-    await this.ensureDefaultTenant();
-    await this.ensureDefaultUser();
-    await this.ensureSystemTemplates();
-    this.logger.log('Database initialization completed');
+    const maxRetries = 10;
+    const retryInterval = 3000;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        this.logger.log(`Initializing database (attempt ${attempt}/${maxRetries})...`);
+        await this.ensureDefaultTenant();
+        await this.ensureDefaultUser();
+        await this.ensureSystemTemplates();
+        this.logger.log('Database initialization completed successfully');
+        return;
+      } catch (error: any) {
+        this.logger.warn(
+          `Database initialization failed (attempt ${attempt}/${maxRetries}): ${error.message}`,
+        );
+        if (attempt < maxRetries) {
+          this.logger.log(`Retrying in ${retryInterval / 1000}s...`);
+          await this.sleep(retryInterval);
+        } else {
+          this.logger.error(
+            'Database initialization failed after all retries, but continuing startup...',
+            error.stack,
+          );
+        }
+      }
+    }
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   private async ensureDefaultTenant() {
@@ -62,7 +88,9 @@ export class DatabaseInitService implements OnModuleInit {
         passwordHash,
         role: 'admin',
       });
-      this.logger.log(`Default admin user created (username: ${this.DEFAULT_USERNAME}, password: ${this.DEFAULT_PASSWORD})`);
+      this.logger.log(
+        `Default admin user created (username: ${this.DEFAULT_USERNAME}, password: ${this.DEFAULT_PASSWORD})`,
+      );
     } else {
       const isValid = await bcrypt.compare(this.DEFAULT_PASSWORD, user.passwordHash);
       if (!isValid) {
