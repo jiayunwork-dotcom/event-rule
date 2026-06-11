@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, HttpCode, HttpStatus, Res } from '@nestjs/common';
+import { Response } from 'express';
 import { RulesService, CreateRuleDto } from './rules.service';
 import { Rule } from './rule.entity';
 import { CurrentTenant } from '../common/decorators/tenant.decorator';
@@ -61,5 +62,30 @@ export class RulesController {
   @ApiOperation({ summary: 'Parse DSL and return AST' })
   async parseDsl(@Body() body: { dsl: string }) {
     return this.rulesService.parseDsl(body.dsl);
+  }
+
+  @Post('export')
+  @ApiOperation({ summary: 'Export rules as JSON' })
+  async exportRules(
+    @CurrentTenant() tenantId: string,
+    @Body() body: { ruleIds?: string[] },
+    @Res() res: Response,
+  ) {
+    const rules = await this.rulesService.exportRules(tenantId, body.ruleIds);
+    const timestamp = new Date().toISOString().slice(0, 10);
+    const filename = `rules_${timestamp}.json`;
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(JSON.stringify(rules, null, 2));
+  }
+
+  @Post('import')
+  @ApiOperation({ summary: 'Import rules from JSON' })
+  async importRules(
+    @CurrentTenant() tenantId: string,
+    @Body() body: { rules: any[]; conflictStrategy: 'skip' | 'overwrite' | 'rename' },
+  ) {
+    return this.rulesService.importRules(tenantId, body.rules, body.conflictStrategy);
   }
 }

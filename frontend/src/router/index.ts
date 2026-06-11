@@ -43,6 +43,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '编辑规则', icon: 'Edit', requiresAuth: true },
       },
       {
+        path: 'templates',
+        name: 'RuleTemplates',
+        component: () => import('@/views/RuleTemplates.vue'),
+        meta: { title: '规则模板', icon: 'Collection', requiresAuth: true },
+      },
+      {
         path: 'sources',
         name: 'EventSources',
         component: () => import('@/views/EventSources.vue'),

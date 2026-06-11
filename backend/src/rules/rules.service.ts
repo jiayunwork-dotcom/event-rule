@@ -486,4 +486,149 @@ export class RulesService implements OnModuleInit {
     await this.refreshRulesCache(tenantId);
     return saved;
   }
+
+  async exportRules(tenantId: string, ruleIds?: string[]): Promise<any[]> {
+    let rules: Rule[];
+
+    if (ruleIds && ruleIds.length > 0) {
+      rules = await this.ruleRepository.createQueryBuilder('rule')
+        .where('rule.tenantId = :tenantId', { tenantId })
+        .andWhere('rule.id IN (:...ruleIds)', { ruleIds })
+        .getMany();
+    } else {
+      rules = await this.findAll(tenantId);
+    }
+
+    return rules.map(rule => ({
+      name: rule.name,
+      description: rule.description,
+      severity: rule.severity,
+      conditionType: rule.conditionType,
+      conditions: rule.conditions,
+      dsl: rule.dsl,
+      priority: rule.priority,
+      isEnabled: rule.isEnabled,
+      windowSize: rule.windowSize,
+      groupByLabels: rule.groupByLabels,
+    }));
+  }
+
+  async importRules(
+    tenantId: string,
+    rulesData: any[],
+    conflictStrategy: 'skip' | 'overwrite' | 'rename',
+  ): Promise<{
+    success: number;
+    skipped: number;
+    failed: number;
+    results: Array<{ name: string; status: string; message?: string; newName?: string }>;
+  }> {
+    const result = {
+      success: 0,
+      skipped: 0,
+      failed: 0,
+      results: [] as Array<{ name: string; status: string; message?: string; newName?: string }>,
+    };
+
+    const existingRules = await this.findAll(tenantId);
+    const existingNames = new Set(existingRules.map(r => r.name));
+
+    for (const ruleData of rulesData) {
+      try {
+        const name = ruleData.name;
+
+        if (!name) {
+          result.failed++;
+          result.results.push({
+            name: '未知规则',
+            status: 'failed',
+            message: '规则名称不能为空',
+          });
+          continue;
+        }
+
+        if (existingNames.has(name)) {
+          if (conflictStrategy === 'skip') {
+            result.skipped++;
+            result.results.push({
+              name,
+              status: 'skipped',
+              message: '规则名称已存在，已跳过',
+            });
+            continue;
+          } else if (conflictStrategy === 'overwrite') {
+            const existingRule = existingRules.find(r => r.name === name);
+            if (existingRule) {
+              if (ruleData.conditionType !== ConditionType.DSL) {
+                validateConditions(ruleData.conditions.conditions);
+              }
+              Object.assign(existingRule, ruleData);
+              await this.ruleRepository.save(existingRule);
+              result.success++;
+              result.results.push({
+                name,
+                status: 'success',
+                message: '规则已覆盖更新',
+              });
+              continue;
+            }
+          } else if (conflictStrategy === 'rename') {
+            let newName = `${name}_导入`;
+            let counter = 1;
+            while (existingNames.has(newName)) {
+              counter++;
+              newName = `${name}_导入${counter}`;
+            }
+            ruleData.name = newName;
+
+            if (ruleData.conditionType !== ConditionType.DSL) {
+              validateConditions(ruleData.conditions.conditions);
+            }
+
+            const rule = this.ruleRepository.create({
+              ...ruleData,
+              tenantId,
+            });
+            await this.ruleRepository.save(rule);
+            existingNames.add(newName);
+            result.success++;
+            result.results.push({
+              name,
+              newName,
+              status: 'success',
+              message: '规则重命名后导入成功',
+            });
+            continue;
+          }
+        }
+
+        if (ruleData.conditionType !== ConditionType.DSL) {
+          validateConditions(ruleData.conditions.conditions);
+        }
+
+        const rule = this.ruleRepository.create({
+          ...ruleData,
+          tenantId,
+        });
+        await this.ruleRepository.save(rule);
+        existingNames.add(name);
+        result.success++;
+        result.results.push({
+          name,
+          status: 'success',
+          message: '规则导入成功',
+        });
+      } catch (error: any) {
+        result.failed++;
+        result.results.push({
+          name: ruleData.name || '未知规则',
+          status: 'failed',
+          message: error.message || '导入失败',
+        });
+      }
+    }
+
+    await this.refreshRulesCache(tenantId);
+    return result;
+  }
 }

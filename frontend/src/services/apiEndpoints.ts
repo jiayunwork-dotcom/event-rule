@@ -37,6 +37,37 @@ export interface Rule {
   updatedAt: string;
 }
 
+export interface RuleTemplate {
+  id: string;
+  tenantId?: string;
+  type: 'system' | 'custom';
+  name: string;
+  description?: string;
+  severity: 'info' | 'warning' | 'critical' | 'fatal';
+  conditionType: string;
+  conditions: any;
+  dsl?: string;
+  priority: number;
+  windowSize: number;
+  groupByLabels: string[];
+  sceneTags: string[];
+  suggestedThreshold?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ImportResult {
+  success: number;
+  skipped: number;
+  failed: number;
+  results: Array<{
+    name: string;
+    status: string;
+    message?: string;
+    newName?: string;
+  }>;
+}
+
 export interface DashboardStats {
   activeAlerts: {
     total: number;
@@ -95,6 +126,22 @@ export const rulesApi = {
   enableRule: (id: string) => api.post<Rule>(`/api/v1/rules/${id}/enable`),
   disableRule: (id: string) => api.post<Rule>(`/api/v1/rules/${id}/disable`),
   parseDsl: (dsl: string) => api.post('/api/v1/rules/parse-dsl', { dsl }),
+  exportRules: (ruleIds?: string[]) => api.post('/api/v1/rules/export', { ruleIds }, { responseType: 'blob' }),
+  importRules: (rules: any[], conflictStrategy: 'skip' | 'overwrite' | 'rename') =>
+    api.post<ImportResult>('/api/v1/rules/import', { rules, conflictStrategy }),
+};
+
+export const templatesApi = {
+  getTemplates: (params?: { keyword?: string; sceneTag?: string; type?: string }) =>
+    api.get<RuleTemplate[]>('/api/v1/rule-templates', { params }),
+  getTemplate: (id: string) => api.get<RuleTemplate>(`/api/v1/rule-templates/${id}`),
+  createTemplate: (data: Partial<RuleTemplate>) => api.post<RuleTemplate>('/api/v1/rule-templates', data),
+  createTemplateFromRule: (ruleId: string, name: string, sceneTags?: string[]) =>
+    api.post<RuleTemplate>(`/api/v1/rule-templates/from-rule/${ruleId}`, { name, sceneTags }),
+  updateTemplate: (id: string, data: Partial<RuleTemplate>) =>
+    api.put<RuleTemplate>(`/api/v1/rule-templates/${id}`, data),
+  deleteTemplate: (id: string) => api.delete(`/api/v1/rule-templates/${id}`),
+  getSceneTags: () => api.get<string[]>('/api/v1/rule-templates/scene-tags'),
 };
 
 export const dashboardApi = {
