@@ -113,11 +113,20 @@ router.beforeEach((to, _from, next) => {
 
   if (needsAuth && !token) {
     next({ path: '/login', query: { redirect: to.fullPath } });
-  } else if (to.path === '/login' && token) {
-    next('/dashboard');
-  } else {
-    next();
+    return;
   }
+
+  if ((to.path === '/login' || to.path === '/') && token) {
+    next('/dashboard');
+    return;
+  }
+
+  if (to.path === '/' && !token) {
+    next('/login');
+    return;
+  }
+
+  next();
 });
 
 export default router;

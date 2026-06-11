@@ -15,7 +15,7 @@ export const typeOrmConfig: DataSourceOptions = {
   password: configService.get('DATABASE_PASSWORD', 'postgres'),
   entities: [__dirname + '/../**/*.entity{.ts,.js}'],
   migrations: [__dirname + '/../database/migrations/*{.ts,.js}'],
-  synchronize: false,
+  synchronize: true,
   logging: configService.get('NODE_ENV') === 'development',
 };
 

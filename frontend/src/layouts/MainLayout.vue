@@ -58,7 +58,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { 
@@ -70,6 +70,13 @@ import {
 const route = useRoute();
 const router = useRouter();
 const authStore = useAuthStore();
+
+onMounted(() => {
+  const token = localStorage.getItem('token');
+  if (!token) {
+    router.replace({ path: '/login', query: { redirect: route.fullPath } });
+  }
+});
 
 const activeMenu = computed(() => route.path);
 
