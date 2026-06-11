@@ -73,7 +73,7 @@ export class Rule {
   @Column({ name: 'window_size', default: 300 })
   windowSize: number;
 
-  @Column({ name: 'group_by_labels', type: 'simple-array', default: '' })
+  @Column({ name: 'group_by_labels', type: 'varchar', array: true, default: () => 'ARRAY[]::VARCHAR[]' })
   groupByLabels: string[];
 
   @CreateDateColumn({ name: 'created_at' })

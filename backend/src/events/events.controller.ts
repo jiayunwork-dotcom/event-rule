@@ -116,7 +116,7 @@ export class EventsController {
   }
 
   @ApiBearerAuth()
-  @Post('api/v1/events')
+  @Post(['api/v1/events', 'api/v1/events/metrics'])
   @ApiOperation({ summary: 'Receive metric event for rule matching' })
   async receiveMetricEvent(
     @CurrentTenant() tenantId: string,

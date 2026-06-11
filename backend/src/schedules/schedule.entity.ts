@@ -75,10 +75,10 @@ export class NotificationPolicy {
   @Column({ length: 100 })
   name: string;
 
-  @Column({ name: 'severity_levels', type: 'simple-array', default: '' })
+  @Column({ name: 'severity_levels', type: 'varchar', array: true, default: () => 'ARRAY[]::VARCHAR[]' })
   severityLevels: AlertSeverity[];
 
-  @Column({ name: 'channel_ids', type: 'simple-array', default: '' })
+  @Column({ name: 'channel_ids', type: 'uuid', array: true, default: () => 'ARRAY[]::UUID[]' })
   channelIds: string[];
 
   @Column({ name: 'schedule_id', nullable: true })

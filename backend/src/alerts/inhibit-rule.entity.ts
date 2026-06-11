@@ -22,7 +22,7 @@ export class InhibitRule {
   @Column({ name: 'target_matchers', type: 'jsonb' })
   targetMatchers: Array<{ label: string; value: string; type: 'eq' | 'regex' }>;
 
-  @Column({ name: 'equal_labels', type: 'simple-array', default: '' })
+  @Column({ name: 'equal_labels', type: 'varchar', array: true, default: () => 'ARRAY[]::VARCHAR[]' })
   equalLabels: string[];
 
   @Column({ name: 'is_enabled', default: true })

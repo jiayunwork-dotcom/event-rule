@@ -226,7 +226,7 @@ export const sourcesApi = {
   deleteAgentConfig: (id: string) => api.delete(`/api/v1/agent-configs/${id}`),
   getWebhookInfo: () => api.get('/api/v1/webhook/info'),
   sendMetricEvent: (data: { metric_name: string; value: number; labels?: Record<string, string>; timestamp?: string }) =>
-    api.post('/api/v1/events', data),
+    api.post('/api/v1/events/metrics', data),
 };
 
 export const tenantsApi = {

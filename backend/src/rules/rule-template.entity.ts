@@ -59,10 +59,10 @@ export class RuleTemplate {
   @Column({ name: 'window_size', default: 300 })
   windowSize: number;
 
-  @Column({ name: 'group_by_labels', type: 'simple-array', default: '' })
+  @Column({ name: 'group_by_labels', type: 'varchar', array: true, default: () => 'ARRAY[]::VARCHAR[]' })
   groupByLabels: string[];
 
-  @Column({ name: 'scene_tags', type: 'simple-array', default: '' })
+  @Column({ name: 'scene_tags', type: 'varchar', array: true, default: () => 'ARRAY[]::VARCHAR[]' })
   sceneTags: string[];
 
   @Column({ name: 'suggested_threshold', type: 'text', nullable: true })
