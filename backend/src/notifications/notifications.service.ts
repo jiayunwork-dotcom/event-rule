@@ -539,6 +539,43 @@ export class NotificationsService implements OnModuleInit {
     await this.policyRepository.delete({ id, tenantId });
   }
 
+  async getNotificationsByAlertId(tenantId: string, alertId: string): Promise<Notification[]> {
+    return this.notificationRepository.find({
+      where: { tenantId, alertId },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async retryNotification(tenantId: string, notificationId: string): Promise<Notification> {
+    const notification = await this.notificationRepository.findOne({
+      where: { id: notificationId, tenantId },
+    });
+
+    if (!notification) {
+      throw new BadRequestException('Notification not found');
+    }
+
+    if (notification.status !== NotificationStatus.FAILED && notification.status !== NotificationStatus.DEAD_LETTER) {
+      throw new BadRequestException('Only failed or dead_letter notifications can be retried');
+    }
+
+    notification.status = NotificationStatus.PENDING;
+    notification.retryCount = 0;
+    notification.errorMessage = null;
+    notification.nextRetryAt = null;
+    await this.notificationRepository.save(notification);
+
+    const channel = await this.channelRepository.findOne({
+      where: { id: notification.channelId! },
+    });
+
+    if (channel) {
+      await this.processNotification(notification, channel);
+    }
+
+    return notification;
+  }
+
   async getDeadLetters(tenantId: string): Promise<DeadLetter[]> {
     return this.deadLetterRepository.find({ 
       where: { tenantId },

@@ -58,6 +58,16 @@ export class RulesController {
     return this.rulesService.toggleEnabled(tenantId, id, false);
   }
 
+  @Post(':id/simulate')
+  @ApiOperation({ summary: 'Simulate rule matching with test event data' })
+  async simulate(
+    @CurrentTenant() tenantId: string,
+    @Param('id') id: string,
+    @Body() body: { metricName?: string; value?: number; labels?: Record<string, string>; timestamp?: string },
+  ) {
+    return this.rulesService.simulateRule(tenantId, id, body);
+  }
+
   @Post('parse-dsl')
   @ApiOperation({ summary: 'Parse DSL and return AST' })
   async parseDsl(@Body() body: { dsl: string }) {

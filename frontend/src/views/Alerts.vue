@@ -57,36 +57,98 @@
       </el-form>
     </div>
 
+    <div v-if="selectedAlertIds.length > 0" class="batch-bar card">
+      <div class="batch-bar-inner">
+        <span class="batch-count">已选择 <strong>{{ selectedAlertIds.length }}</strong> 条告警</span>
+        <div class="batch-actions">
+          <el-button type="primary" @click="batchAcknowledge" :disabled="!hasPendingSelected">
+            批量确认
+          </el-button>
+          <el-button type="warning" @click="openBatchResolveDialog" :disabled="!hasProcessingSelected">
+            批量解决
+          </el-button>
+          <el-button @click="clearSelection">取消选择</el-button>
+        </div>
+      </div>
+    </div>
+
     <div class="card">
       <template v-if="viewMode === 'list'">
-        <el-table :data="filteredAlerts" v-loading="loading" stripe row-key="id" @expand-change="onExpandChange">
+        <el-table
+          ref="alertTableRef"
+          :data="filteredAlerts"
+          v-loading="loading"
+          stripe
+          row-key="id"
+          @expand-change="onExpandChange"
+          @selection-change="handleAlertSelectionChange"
+        >
+          <el-table-column type="selection" width="45" />
           <el-table-column type="expand">
             <template #default="{ row }">
               <div class="history-expand">
-                <h4 class="history-title">状态变更历史</h4>
-                <div v-if="expandedHistory[row.id]?.loading" class="history-loading">
-                  <el-icon class="is-loading"><Loading /></el-icon>
-                  加载中...
-                </div>
-                <el-timeline v-else-if="expandedHistory[row.id]?.data?.length">
-                  <el-timeline-item
-                    v-for="item in expandedHistory[row.id].data"
-                    :key="item.id"
-                    :timestamp="formatTime(item.createdAt)"
-                    :type="getHistoryType(item.newStatus)"
-                    size="large"
-                  >
-                    <h4>{{ getStatusText(item.newStatus) }}</h4>
-                    <p v-if="item.remark">{{ item.remark }}</p>
-                    <p class="text-muted" v-if="item.operatorId">
-                      操作人: {{ item.operatorId }}
-                    </p>
-                    <p class="text-muted" v-if="item.oldStatus">
-                      从 {{ getStatusText(item.oldStatus) }} 变更
-                    </p>
-                  </el-timeline-item>
-                </el-timeline>
-                <el-empty v-else description="暂无历史记录" :image-size="60" />
+                <el-tabs v-model="expandedTab[row.id]" @tab-change="(tab: any) => onExpandTabChange(row.id, tab)">
+                  <el-tab-pane label="状态变更历史" name="history">
+                    <div v-if="expandedHistory[row.id]?.loading" class="history-loading">
+                      <el-icon class="is-loading"><Loading /></el-icon>
+                      加载中...
+                    </div>
+                    <el-timeline v-else-if="expandedHistory[row.id]?.data?.length">
+                      <el-timeline-item
+                        v-for="item in expandedHistory[row.id].data"
+                        :key="item.id"
+                        :timestamp="formatTime(item.createdAt)"
+                        :type="getHistoryType(item.newStatus)"
+                        size="large"
+                      >
+                        <h4>{{ getStatusText(item.newStatus) }}</h4>
+                        <p v-if="item.remark">{{ item.remark }}</p>
+                        <p class="text-muted" v-if="item.operatorId">
+                          操作人: {{ item.operatorId }}
+                        </p>
+                        <p class="text-muted" v-if="item.oldStatus">
+                          从 {{ getStatusText(item.oldStatus) }} 变更
+                        </p>
+                      </el-timeline-item>
+                    </el-timeline>
+                    <el-empty v-else description="暂无历史记录" :image-size="60" />
+                  </el-tab-pane>
+                  <el-tab-pane label="通知记录" name="notifications">
+                    <div v-if="expandedNotifications[row.id]?.loading" class="history-loading">
+                      <el-icon class="is-loading"><Loading /></el-icon>
+                      加载中...
+                    </div>
+                    <div v-else-if="expandedNotifications[row.id]?.data?.length" class="notification-list">
+                      <div
+                        v-for="notif in expandedNotifications[row.id].data"
+                        :key="notif.id"
+                        :class="['notification-item', `status-${notif.status}`]"
+                      >
+                        <div class="notification-header">
+                          <el-tag size="small" :type="getNotificationStatusType(notif.status)">
+                            {{ getNotificationStatusText(notif.status) }}
+                          </el-tag>
+                          <span class="notification-channel">{{ getChannelTypeText(notif.channelType) }}</span>
+                          <span class="notification-recipient">{{ notif.recipient || '-' }}</span>
+                          <span class="notification-time">{{ formatTime(notif.createdAt) }}</span>
+                        </div>
+                        <div v-if="notif.errorMessage" class="notification-error">
+                          <el-icon color="#f56c6c"><CircleCloseFilled /></el-icon>
+                          <span>{{ notif.errorMessage }}</span>
+                          <el-button type="primary" size="small" @click="retryNotification(row.id, notif.id)" :loading="retryingNotifId === notif.id">
+                            重试
+                          </el-button>
+                        </div>
+                        <div v-if="notif.status === 'failed' && !notif.errorMessage" class="notification-error">
+                          <el-button type="primary" size="small" @click="retryNotification(row.id, notif.id)" :loading="retryingNotifId === notif.id">
+                            重试
+                          </el-button>
+                        </div>
+                      </div>
+                    </div>
+                    <el-empty v-else description="暂无通知记录" :image-size="60" />
+                  </el-tab-pane>
+                </el-tabs>
               </div>
             </template>
           </el-table-column>
@@ -319,6 +381,20 @@
         <el-button type="primary" @click="confirmResolve" :disabled="!resolveForm.resolvedReason">确认解决</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="batchResolveDialogVisible" title="批量解决告警" width="500px">
+      <el-form :model="batchResolveForm" label-width="80px">
+        <el-form-item label="解决原因" required>
+          <el-input v-model="batchResolveForm.resolvedReason" type="textarea" :rows="3" placeholder="请填写统一解决原因" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="batchResolveDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="doBatchResolve" :disabled="!batchResolveForm.resolvedReason" :loading="batchOperating">
+          确认解决
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -326,8 +402,15 @@
 import { ref, reactive, computed, onMounted, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import dayjs from 'dayjs';
-import { alertsApi, Alert, AlertGroup, AlertHistoryItem } from '@/services/apiEndpoints';
-import { Search, Loading } from '@element-plus/icons-vue';
+import {
+  alertsApi,
+  notificationsApi,
+  Alert,
+  AlertGroup,
+  AlertHistoryItem,
+  NotificationItem,
+} from '@/services/apiEndpoints';
+import { Search, Loading, CircleCloseFilled } from '@element-plus/icons-vue';
 
 const loading = ref(false);
 const viewMode = ref<'list' | 'grouped'>('list');
@@ -338,6 +421,19 @@ const historyDialogVisible = ref(false);
 const resolveDialogVisible = ref(false);
 const currentAlert = ref<Alert | null>(null);
 const expandedHistory = reactive<Record<string, { loading: boolean; data: AlertHistoryItem[] }>>({});
+const expandedNotifications = reactive<Record<string, { loading: boolean; data: NotificationItem[] }>>({});
+const expandedTab = reactive<Record<string, string>>({});
+const retryingNotifId = ref<string | null>(null);
+
+const alertTableRef = ref<any>(null);
+const selectedAlertIds = ref<string[]>([]);
+const selectedAlerts = ref<Alert[]>([]);
+
+const batchResolveDialogVisible = ref(false);
+const batchOperating = ref(false);
+const batchResolveForm = reactive({
+  resolvedReason: '',
+});
 
 const resolveForm = reactive({
   remark: '',
@@ -349,6 +445,14 @@ const filters = reactive({
   severity: [] as string[],
   dateRange: [] as string[],
   labelFilter: '',
+});
+
+const hasPendingSelected = computed(() => {
+  return selectedAlerts.value.some(a => a.status === 'pending');
+});
+
+const hasProcessingSelected = computed(() => {
+  return selectedAlerts.value.some(a => a.status === 'processing');
 });
 
 const filteredAlerts = computed(() => {
@@ -403,6 +507,38 @@ function getHistoryType(status: string) {
   return getStatusType(status);
 }
 
+function getNotificationStatusType(status: string) {
+  const map: Record<string, string> = {
+    pending: 'info',
+    sending: 'warning',
+    sent: 'success',
+    failed: 'danger',
+    dead_letter: 'danger',
+  };
+  return map[status] || 'info';
+}
+
+function getNotificationStatusText(status: string) {
+  const map: Record<string, string> = {
+    pending: '待发送',
+    sending: '发送中',
+    sent: '发送成功',
+    failed: '发送失败',
+    dead_letter: '死信',
+  };
+  return map[status] || status;
+}
+
+function getChannelTypeText(type: string) {
+  const map: Record<string, string> = {
+    email: '邮件',
+    slack: 'Slack',
+    wechat: '企业微信',
+    webhook: 'Webhook',
+  };
+  return map[type] || type;
+}
+
 async function loadAlerts() {
   loading.value = true;
   try {
@@ -448,9 +584,137 @@ async function loadAlertHistory(alertId: string) {
   }
 }
 
+async function loadAlertNotifications(alertId: string) {
+  if (expandedNotifications[alertId]) return;
+  expandedNotifications[alertId] = { loading: true, data: [] };
+  try {
+    const response = await notificationsApi.getNotificationsByAlertId(alertId);
+    expandedNotifications[alertId] = { loading: false, data: response.data };
+  } catch (error) {
+    console.error('Failed to load alert notifications:', error);
+    expandedNotifications[alertId] = { loading: false, data: [] };
+  }
+}
+
 function onExpandChange(row: Alert, expandedRows: Alert[]) {
   if (expandedRows.includes(row)) {
+    if (!expandedTab[row.id]) {
+      expandedTab[row.id] = 'history';
+    }
     loadAlertHistory(row.id);
+  }
+}
+
+function onExpandTabChange(alertId: string, tab: string) {
+  expandedTab[alertId] = tab;
+  if (tab === 'notifications') {
+    loadAlertNotifications(alertId);
+  } else if (tab === 'history') {
+    loadAlertHistory(alertId);
+  }
+}
+
+function handleAlertSelectionChange(selection: Alert[]) {
+  selectedAlertIds.value = selection.map(a => a.id);
+  selectedAlerts.value = selection;
+}
+
+function clearSelection() {
+  selectedAlertIds.value = [];
+  selectedAlerts.value = [];
+  if (alertTableRef.value) {
+    alertTableRef.value.clearSelection();
+  }
+}
+
+async function batchAcknowledge() {
+  const pendingIds = selectedAlerts.value
+    .filter(a => a.status === 'pending')
+    .map(a => a.id);
+
+  if (pendingIds.length === 0) {
+    ElMessage.warning('没有可确认的待确认告警');
+    return;
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确认批量确认 ${pendingIds.length} 条待确认告警?`,
+      '批量确认',
+      { type: 'warning' }
+    );
+
+    batchOperating.value = true;
+    const response = await alertsApi.batchAcknowledge(pendingIds);
+    const { operated, skipped } = response.data;
+    let msg = `${operated} 条已操作`;
+    if (skipped > 0) {
+      msg += `，${skipped} 条因状态不符已跳过`;
+    }
+    ElMessage.success(msg);
+    clearSelection();
+    loadAlerts();
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('Failed to batch acknowledge:', error);
+      ElMessage.error((error as any)?.response?.data?.message || '批量确认失败');
+    }
+  } finally {
+    batchOperating.value = false;
+  }
+}
+
+function openBatchResolveDialog() {
+  batchResolveForm.resolvedReason = '';
+  batchResolveDialogVisible.value = true;
+}
+
+async function doBatchResolve() {
+  const processingIds = selectedAlerts.value
+    .filter(a => a.status === 'processing')
+    .map(a => a.id);
+
+  if (processingIds.length === 0) {
+    ElMessage.warning('没有可解决的处于处理中状态的告警');
+    return;
+  }
+
+  if (!batchResolveForm.resolvedReason) {
+    ElMessage.warning('请填写解决原因');
+    return;
+  }
+
+  batchOperating.value = true;
+  try {
+    const response = await alertsApi.batchResolve(processingIds, batchResolveForm.resolvedReason);
+    const { operated, skipped } = response.data;
+    let msg = `${operated} 条已操作`;
+    if (skipped > 0) {
+      msg += `，${skipped} 条因状态不符已跳过`;
+    }
+    ElMessage.success(msg);
+    batchResolveDialogVisible.value = false;
+    clearSelection();
+    loadAlerts();
+  } catch (error) {
+    console.error('Failed to batch resolve:', error);
+    ElMessage.error((error as any)?.response?.data?.message || '批量解决失败');
+  } finally {
+    batchOperating.value = false;
+  }
+}
+
+async function retryNotification(alertId: string, notificationId: string) {
+  retryingNotifId.value = notificationId;
+  try {
+    await notificationsApi.retryNotification(notificationId);
+    ElMessage.success('通知已重新发送');
+    expandedNotifications[alertId] = { loading: true, data: [] };
+    await loadAlertNotifications(alertId);
+  } catch (error: any) {
+    ElMessage.error(error.response?.data?.message || '重试失败');
+  } finally {
+    retryingNotifId.value = null;
   }
 }
 
@@ -552,6 +816,27 @@ onMounted(() => {
   box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
 }
 
+.batch-bar {
+  margin-bottom: 12px;
+  padding: 12px 20px;
+}
+
+.batch-bar-inner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.batch-count {
+  font-size: 14px;
+  color: #606266;
+}
+
+.batch-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .labels-container {
   display: flex;
   flex-wrap: wrap;
@@ -589,5 +874,68 @@ onMounted(() => {
   gap: 8px;
   color: #909399;
   padding: 20px 0;
+}
+
+.notification-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.notification-item {
+  padding: 12px 16px;
+  border-radius: 6px;
+  border: 1px solid #e4e7ed;
+}
+
+.notification-item.status-sent {
+  border-left: 3px solid #67c23a;
+}
+
+.notification-item.status-failed,
+.notification-item.status-dead_letter {
+  border-left: 3px solid #f56c6c;
+}
+
+.notification-item.status-pending,
+.notification-item.status-sending {
+  border-left: 3px solid #e6a23c;
+}
+
+.notification-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.notification-channel {
+  font-size: 13px;
+  font-weight: 500;
+  color: #303133;
+}
+
+.notification-recipient {
+  font-size: 12px;
+  color: #606266;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notification-time {
+  font-size: 12px;
+  color: #909399;
+  margin-left: auto;
+}
+
+.notification-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #f56c6c;
 }
 </style>

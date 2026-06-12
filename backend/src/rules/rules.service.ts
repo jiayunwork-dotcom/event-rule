@@ -493,6 +493,304 @@ export class RulesService implements OnModuleInit {
     return saved;
   }
 
+  async simulateRule(
+    tenantId: string,
+    ruleId: string,
+    eventData: { metricName?: string; value?: number; labels?: Record<string, string>; timestamp?: string },
+  ): Promise<{
+    matched: boolean;
+    matchDetails: Array<{ condition: string; passed: boolean; reason: string }>;
+    aggregationWindowStatus?: { eventCount: number; aggregateResult?: number };
+  }> {
+    const rule = await this.findOne(tenantId, ruleId);
+
+    const event: Event = {
+      source: 'simulate',
+      timestamp: eventData.timestamp ? new Date(eventData.timestamp) : new Date(),
+      labels: eventData.labels || {},
+      metricName: eventData.metricName,
+      value: eventData.value,
+      severity: rule.severity,
+    };
+
+    const matchDetails: Array<{ condition: string; passed: boolean; reason: string }> = [];
+    let matched = false;
+    let aggregationWindowStatus: { eventCount: number; aggregateResult?: number } | undefined;
+
+    switch (rule.conditionType) {
+      case ConditionType.SINGLE_THRESHOLD: {
+        const condition = (rule.conditions as RuleCondition).conditions[0];
+        if (!condition) {
+          matchDetails.push({ condition: '单指标阈值', passed: false, reason: '规则未配置条件' });
+          break;
+        }
+        if (!event.metricName) {
+          matchDetails.push({ condition: '指标名称匹配', passed: false, reason: '模拟事件未提供 metric_name' });
+          break;
+        }
+        if (event.metricName !== condition.metric) {
+          matchDetails.push({
+            condition: `指标名称匹配: ${event.metricName} vs ${condition.metric}`,
+            passed: false,
+            reason: `指标名称不匹配, 事件指标 "${event.metricName}" ≠ 规则指标 "${condition.metric}"`,
+          });
+        } else {
+          matchDetails.push({ condition: `指标名称匹配: ${event.metricName}`, passed: true, reason: '指标名称匹配' });
+        }
+        if (event.value === undefined) {
+          matchDetails.push({ condition: '指标值比较', passed: false, reason: '模拟事件未提供 value' });
+        } else {
+          const valueMatched = this.compareValue(event.value, condition.operator!, condition.value as number);
+          matchDetails.push({
+            condition: `指标值比较: ${event.value} ${condition.operator} ${condition.value}`,
+            passed: valueMatched,
+            reason: valueMatched
+              ? `${event.value} ${condition.operator} ${condition.value} 成立`
+              : `${event.value} ${condition.operator} ${condition.value} 不成立`,
+          });
+        }
+        matched = matchDetails.every(d => d.passed);
+        break;
+      }
+
+      case ConditionType.MULTI_CONDITION: {
+        const ruleCondition = rule.conditions as RuleCondition;
+        for (let i = 0; i < ruleCondition.conditions.length; i++) {
+          const condition = ruleCondition.conditions[i];
+          if (condition.type === 'threshold') {
+            if (event.metricName !== condition.metric) {
+              matchDetails.push({
+                condition: `[条件${i + 1}] 阈值指标匹配: ${event.metricName || '无'} vs ${condition.metric}`,
+                passed: false,
+                reason: `指标名称不匹配`,
+              });
+            } else {
+              const valueMatched = event.value !== undefined && this.compareValue(event.value, condition.operator!, condition.value as number);
+              matchDetails.push({
+                condition: `[条件${i + 1}] 阈值: ${event.value} ${condition.operator} ${condition.value}`,
+                passed: valueMatched,
+                reason: valueMatched ? '阈值条件满足' : '阈值条件不满足',
+              });
+            }
+          } else if (condition.type === 'label') {
+            const labelValue = event.labels[condition.label!];
+            if (!labelValue) {
+              matchDetails.push({
+                condition: `[条件${i + 1}] 标签匹配: ${condition.label}`,
+                passed: false,
+                reason: `事件中不存在标签 "${condition.label}"`,
+              });
+            } else {
+              const labelMatched = this.compareString(labelValue, condition.operator!, condition.labelValue!);
+              matchDetails.push({
+                condition: `[条件${i + 1}] 标签: ${condition.label}=${labelValue} ${condition.operator} ${condition.labelValue}`,
+                passed: labelMatched,
+                reason: labelMatched ? '标签条件满足' : '标签条件不满足',
+              });
+            }
+          }
+        }
+        if (ruleCondition.operator === 'AND') {
+          matched = matchDetails.every(d => d.passed);
+        } else {
+          matched = matchDetails.some(d => d.passed);
+        }
+        break;
+      }
+
+      case ConditionType.WINDOW_AGGREGATE: {
+        const ruleCondition = rule.conditions as RuleCondition;
+        const windowCondition = ruleCondition.conditions.find(c => c.type === 'window');
+        if (!windowCondition) {
+          matchDetails.push({ condition: '窗口聚合', passed: false, reason: '规则未配置窗口聚合条件' });
+          break;
+        }
+        matchDetails.push({
+          condition: '窗口聚合检测',
+          passed: false,
+          reason: '模拟测试无法提供真实时间窗口数据, 仅展示当前事件是否满足窗口内指标条件',
+        });
+        if (event.metricName && windowCondition.metric && event.metricName !== windowCondition.metric) {
+          matchDetails.push({
+            condition: `窗口指标匹配: ${event.metricName} vs ${windowCondition.metric}`,
+            passed: false,
+            reason: '指标名称不匹配, 该事件不会进入此规则的聚合窗口',
+          });
+        } else {
+          matchDetails.push({
+            condition: `窗口指标匹配: ${event.metricName || windowCondition.metric}`,
+            passed: true,
+            reason: '指标名称匹配, 事件将被加入聚合窗口',
+          });
+          if (event.value !== undefined && windowCondition.operator && windowCondition.threshold !== undefined) {
+            const currentValueMatches = this.compareValue(event.value, windowCondition.operator, windowCondition.threshold);
+            matchDetails.push({
+              condition: `当前值阈值检查: ${event.value} ${windowCondition.operator} ${windowCondition.threshold}`,
+              passed: currentValueMatches,
+              reason: currentValueMatches ? '当前值满足阈值条件' : '当前值不满足阈值条件',
+            });
+          }
+        }
+        const windowKey = `${this.windowDataKey}${tenantId}:${rule.id}`;
+        const now = Date.now();
+        const windowSize = rule.windowSize * 1000;
+        try {
+          const windowData = await this.redisService.zrangebyscore(windowKey, now - windowSize, now);
+          aggregationWindowStatus = { eventCount: windowData.length };
+          if (windowData.length > 0 && windowCondition) {
+            const values = windowData.map(d => parseFloat(JSON.parse(d).value));
+            let aggregateResult: number;
+            switch (windowCondition.aggregate) {
+              case 'count': aggregateResult = values.length; break;
+              case 'sum': aggregateResult = values.reduce((a, b) => a + b, 0); break;
+              case 'avg': aggregateResult = values.reduce((a, b) => a + b, 0) / values.length; break;
+              case 'max': aggregateResult = Math.max(...values); break;
+              case 'min': aggregateResult = Math.min(...values); break;
+              default: aggregateResult = values.length;
+            }
+            aggregationWindowStatus.aggregateResult = aggregateResult;
+          }
+        } catch {
+          aggregationWindowStatus = { eventCount: 0 };
+        }
+        break;
+      }
+
+      case ConditionType.FREQUENCY: {
+        const condition = (rule.conditions as RuleCondition).conditions[0];
+        if (!condition) {
+          matchDetails.push({ condition: '频率检测', passed: false, reason: '规则未配置频率条件' });
+          break;
+        }
+        if (!event.metricName) {
+          matchDetails.push({ condition: '频率检测', passed: false, reason: '模拟事件未提供 metric_name' });
+          break;
+        }
+        matchDetails.push({
+          condition: `频率检测: 窗口 ${condition.windowSize}s 内超过 ${condition.threshold} 次`,
+          passed: false,
+          reason: '模拟测试为单次事件, 无法直接判断频率条件。实际匹配需在时间窗口内积累事件',
+        });
+        const fingerprint = `${tenantId}:${rule.id}:${event.metricName}`;
+        const freqKey = `rule:freq:${fingerprint}`;
+        try {
+          const currentCount = await this.redisService.get(freqKey);
+          matchDetails.push({
+            condition: `当前频率计数`,
+            passed: false,
+            reason: `当前窗口内已有 ${currentCount || 0} 次事件, 阈值为 ${condition.threshold}`,
+          });
+        } catch {
+          matchDetails.push({ condition: '当前频率计数', passed: false, reason: '无法获取频率计数' });
+        }
+        break;
+      }
+
+      case ConditionType.LABEL_MATCH: {
+        const condition = (rule.conditions as RuleCondition).conditions[0];
+        if (!condition) {
+          matchDetails.push({ condition: '标签匹配', passed: false, reason: '规则未配置标签匹配条件' });
+          break;
+        }
+        const labelValue = event.labels[condition.label!];
+        if (!labelValue) {
+          matchDetails.push({
+            condition: `标签匹配: ${condition.label}`,
+            passed: false,
+            reason: `事件中不存在标签 "${condition.label}"`,
+          });
+        } else {
+          const labelMatched = this.compareString(labelValue, condition.operator!, condition.labelValue!);
+          matchDetails.push({
+            condition: `标签匹配: ${condition.label}=${labelValue} ${condition.operator} ${condition.labelValue}`,
+            passed: labelMatched,
+            reason: labelMatched ? '标签条件满足' : '标签条件不满足',
+          });
+        }
+        matched = matchDetails.every(d => d.passed);
+        break;
+      }
+
+      case ConditionType.SEQUENCE_PATTERN: {
+        const condition = (rule.conditions as RuleCondition).conditions[0];
+        if (!condition) {
+          matchDetails.push({ condition: '序列模式', passed: false, reason: '规则未配置序列模式条件' });
+          break;
+        }
+        const eventType = event.labels?.event_type;
+        if (eventType === condition.eventA) {
+          matchDetails.push({
+            condition: `序列模式: 事件A "${condition.eventA}" 匹配`,
+            passed: false,
+            reason: '当前事件匹配序列起点(A事件), 但序列需要后续出现B事件才能完整匹配',
+          });
+        } else if (eventType === condition.eventB) {
+          const timerKey = `${this.sequenceTimersKey}${tenantId}:${rule.id}`;
+          let hasTimer = false;
+          try {
+            const timerData = await this.redisService.get(timerKey);
+            hasTimer = !!timerData;
+          } catch {}
+          matchDetails.push({
+            condition: `序列模式: 事件B "${condition.eventB}" 匹配`,
+            passed: hasTimer,
+            reason: hasTimer
+              ? '已找到对应的A事件, 序列匹配成功'
+              : '未找到对应的A事件, 序列匹配失败',
+          });
+        } else {
+          matchDetails.push({
+            condition: `序列模式: 事件类型 "${eventType || '无'}" 不匹配A(${condition.eventA})或B(${condition.eventB})`,
+            passed: false,
+            reason: '事件的 event_type 标签不匹配序列模式中的任何事件',
+          });
+        }
+        break;
+      }
+
+      case ConditionType.DSL: {
+        if (!rule.dsl) {
+          matchDetails.push({ condition: 'DSL规则', passed: false, reason: '规则未配置DSL' });
+          break;
+        }
+        try {
+          const parsed = this.parseDsl(rule.dsl);
+          for (const whereCondition of parsed.where) {
+            const labelValue = event.labels[whereCondition.label];
+            if (!labelValue) {
+              matchDetails.push({
+                condition: `DSL WHERE: label.${whereCondition.label} ${whereCondition.operator} "${whereCondition.value}"`,
+                passed: false,
+                reason: `事件中不存在标签 "${whereCondition.label}"`,
+              });
+            } else if (!this.compareString(labelValue, whereCondition.operator, whereCondition.value)) {
+              matchDetails.push({
+                condition: `DSL WHERE: label.${whereCondition.label}=${labelValue} ${whereCondition.operator} "${whereCondition.value}"`,
+                passed: false,
+                reason: `标签值不匹配: ${labelValue} ${whereCondition.operator} ${whereCondition.value}`,
+              });
+            } else {
+              matchDetails.push({
+                condition: `DSL WHERE: label.${whereCondition.label}=${labelValue} ${whereCondition.operator} "${whereCondition.value}"`,
+                passed: true,
+                reason: '标签条件满足',
+              });
+            }
+          }
+          matched = matchDetails.every(d => d.passed);
+        } catch (error: any) {
+          matchDetails.push({ condition: 'DSL解析', passed: false, reason: `DSL解析错误: ${error.message}` });
+        }
+        break;
+      }
+
+      default:
+        matchDetails.push({ condition: '未知条件类型', passed: false, reason: `不支持的条件类型: ${rule.conditionType}` });
+    }
+
+    return { matched, matchDetails, aggregationWindowStatus };
+  }
+
   async exportRules(tenantId: string, ruleIds?: string[]): Promise<any[]> {
     let rules: Rule[];
 

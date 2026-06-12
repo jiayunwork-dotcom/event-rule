@@ -116,6 +116,24 @@ export class NotificationsController {
     });
   }
 
+  @Get('notifications/alert/:alertId')
+  @ApiOperation({ summary: 'Get notifications for a specific alert' })
+  async getNotificationsByAlertId(
+    @CurrentTenant() tenantId: string,
+    @Param('alertId') alertId: string,
+  ): Promise<Notification[]> {
+    return this.notificationsService.getNotificationsByAlertId(tenantId, alertId);
+  }
+
+  @Post('notifications/:id/retry')
+  @ApiOperation({ summary: 'Retry a failed notification' })
+  async retryNotification(
+    @CurrentTenant() tenantId: string,
+    @Param('id') id: string,
+  ): Promise<Notification> {
+    return this.notificationsService.retryNotification(tenantId, id);
+  }
+
   @Get('dead-letters')
   @ApiOperation({ summary: 'Get dead letter queue' })
   async getDeadLetters(@CurrentTenant() tenantId: string): Promise<DeadLetter[]> {

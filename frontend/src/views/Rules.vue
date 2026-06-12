@@ -20,63 +20,198 @@
       </div>
     </div>
 
-    <div class="card">
-      <el-table :data="rules" v-loading="loading" stripe @selection-change="handleSelectionChange">
-        <el-table-column width="55" type="selection" />
-        <el-table-column width="60" type="index" />
-        
-        <el-table-column prop="name" label="规则名称" min-width="150" show-overflow-tooltip />
-        
-        <el-table-column prop="description" label="描述" min-width="200" show-overflow-tooltip />
-        
-        <el-table-column prop="severity" label="严重程度" width="100">
-          <template #default="{ row }">
-            <el-tag :type="getSeverityType(row.severity)" effect="dark">
-              {{ row.severity.toUpperCase() }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        
-        <el-table-column prop="conditionType" label="条件类型" width="130">
-          <template #default="{ row }">
-            {{ getConditionTypeText(row.conditionType) }}
-          </template>
-        </el-table-column>
-        
-        <el-table-column prop="priority" label="优先级" width="80" />
-        
-        <el-table-column prop="isEnabled" label="状态" width="90">
-          <template #default="{ row }">
-            <el-switch
-              :model-value="row.isEnabled"
-              @change="(val) => toggleRule(row, val)"
-              active-text="启用"
-              inactive-text="禁用"
-            />
-          </template>
-        </el-table-column>
-        
-        <el-table-column prop="createdAt" label="创建时间" width="170">
-          <template #default="{ row }">
-            {{ formatTime(row.createdAt) }}
-          </template>
-        </el-table-column>
-        
-        <el-table-column label="操作" width="240" fixed="right">
-          <template #default="{ row }">
-            <el-button type="primary" size="small" @click="editRule(row)">
-              编辑
-            </el-button>
-            <el-button type="success" size="small" @click="saveAsTemplate(row)">
-              存为模板
-            </el-button>
-            <el-button type="danger" size="small" @click="deleteRule(row)">
-              删除
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </div>
+    <el-tabs v-model="activeTab" class="card">
+      <el-tab-pane label="规则列表" name="list">
+        <el-table :data="rules" v-loading="loading" stripe @selection-change="handleSelectionChange">
+          <el-table-column width="55" type="selection" />
+          <el-table-column width="60" type="index" />
+          
+          <el-table-column prop="name" label="规则名称" min-width="150" show-overflow-tooltip />
+          
+          <el-table-column prop="description" label="描述" min-width="200" show-overflow-tooltip />
+          
+          <el-table-column prop="severity" label="严重程度" width="100">
+            <template #default="{ row }">
+              <el-tag :type="getSeverityType(row.severity)" effect="dark">
+                {{ row.severity.toUpperCase() }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          
+          <el-table-column prop="conditionType" label="条件类型" width="130">
+            <template #default="{ row }">
+              {{ getConditionTypeText(row.conditionType) }}
+            </template>
+          </el-table-column>
+          
+          <el-table-column prop="priority" label="优先级" width="80" />
+          
+          <el-table-column prop="isEnabled" label="状态" width="90">
+            <template #default="{ row }">
+              <el-switch
+                :model-value="row.isEnabled"
+                @change="(val) => toggleRule(row, val)"
+                active-text="启用"
+                inactive-text="禁用"
+              />
+            </template>
+          </el-table-column>
+          
+          <el-table-column prop="createdAt" label="创建时间" width="170">
+            <template #default="{ row }">
+              {{ formatTime(row.createdAt) }}
+            </template>
+          </el-table-column>
+          
+          <el-table-column label="操作" width="300" fixed="right">
+            <template #default="{ row }">
+              <el-button type="warning" size="small" @click="openSimulateDialog(row)">
+                模拟测试
+              </el-button>
+              <el-button type="primary" size="small" @click="editRule(row)">
+                编辑
+              </el-button>
+              <el-button type="success" size="small" @click="saveAsTemplate(row)">
+                存为模板
+              </el-button>
+              <el-button type="danger" size="small" @click="deleteRule(row)">
+                删除
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
+
+      <el-tab-pane label="依赖关系" name="dependency">
+        <div v-if="inhibitRules.length === 0" class="dep-empty">
+          <el-empty description="暂无抑制规则，无法展示依赖关系图" />
+        </div>
+        <div v-else class="dependency-graph-container">
+          <svg class="dependency-svg" :width="svgWidth" :height="svgHeight">
+            <defs>
+              <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+                <polygon points="0 0, 10 3.5, 0 7" fill="#409eff" />
+              </marker>
+            </defs>
+            <template v-for="edge in graphEdges" :key="edge.id">
+              <line
+                :x1="edge.x1" :y1="edge.y1"
+                :x2="edge.x2" :y2="edge.y2"
+                :stroke="edge.highlighted ? '#409eff' : '#c0c4cc'"
+                :stroke-width="edge.highlighted ? 2.5 : 1.5"
+                marker-end="url(#arrowhead)"
+                class="graph-edge"
+              />
+            </template>
+            <template v-for="node in graphNodes" :key="node.id">
+              <g @click="highlightNode(node.id)" class="graph-node" :class="{ 'node-highlighted': node.highlighted }">
+                <rect
+                  :x="node.x - node.width / 2" :y="node.y - 20"
+                  :width="node.width" :height="40"
+                  :rx="6" :ry="6"
+                  :fill="node.highlighted ? '#ecf5ff' : '#fff'"
+                  :stroke="node.highlighted ? '#409eff' : (node.isEnabled ? '#67c23a' : '#909399')"
+                  :stroke-width="node.highlighted ? 2.5 : 1.5"
+                />
+                <circle
+                  :cx="node.x - node.width / 2 + 14" :cy="node.y"
+                  r="5"
+                  :fill="node.isEnabled ? '#67c23a' : '#909399'"
+                />
+                <text
+                  :x="node.x - node.width / 2 + 24" :y="node.y + 5"
+                  font-size="12" fill="#303133"
+                >{{ node.name }}</text>
+              </g>
+            </template>
+          </svg>
+          <div class="graph-legend">
+            <span class="legend-item"><span class="legend-dot enabled"></span> 已启用</span>
+            <span class="legend-item"><span class="legend-dot disabled"></span> 已禁用</span>
+            <span class="legend-item">→ 抑制方向 (source → target)</span>
+          </div>
+        </div>
+      </el-tab-pane>
+    </el-tabs>
+
+    <el-dialog
+      v-model="simulateDialogVisible"
+      title="规则模拟测试"
+      width="650px"
+      :close-on-click-modal="false"
+    >
+      <div v-if="simulateRule" class="simulate-dialog">
+        <div class="simulate-rule-info">
+          <el-tag :type="getSeverityType(simulateRule.severity)" effect="dark" size="small">
+            {{ simulateRule.severity.toUpperCase() }}
+          </el-tag>
+          <span class="simulate-rule-name">{{ simulateRule.name }}</span>
+          <el-tag size="small" type="info">{{ getConditionTypeText(simulateRule.conditionType) }}</el-tag>
+        </div>
+
+        <el-divider content-position="left">模拟事件数据</el-divider>
+
+        <el-form :model="simulateForm" label-width="100px" size="default">
+          <el-form-item label="指标名称">
+            <el-input v-model="simulateForm.metricName" placeholder="例如: cpu_usage" />
+          </el-form-item>
+          <el-form-item label="指标值">
+            <el-input v-model.number="simulateForm.value" type="number" placeholder="例如: 85.5" />
+          </el-form-item>
+          <el-form-item label="标签">
+            <div class="labels-input-area">
+              <div v-for="(item, index) in simulateForm.labels" :key="index" class="label-input-row">
+                <el-input v-model="item.key" placeholder="标签键" style="width: 40%" />
+                <span class="label-eq">=</span>
+                <el-input v-model="item.value" placeholder="标签值" style="width: 40%" />
+                <el-button type="danger" size="small" @click="removeSimulateLabel(index)" :icon="Delete" circle />
+              </div>
+              <el-button size="small" @click="addSimulateLabel">+ 添加标签</el-button>
+            </div>
+          </el-form-item>
+          <el-form-item label="时间戳">
+            <el-input v-model="simulateForm.timestamp" placeholder="可选, 例如: 2025-01-01T00:00:00Z" />
+          </el-form-item>
+        </el-form>
+      </div>
+
+      <div v-if="simulateResult" class="simulate-result">
+        <el-divider content-position="left">匹配结果</el-divider>
+        <div :class="['simulate-match-status', simulateResult.matched ? 'matched' : 'not-matched']">
+          <span class="status-icon">{{ simulateResult.matched ? '✓' : '✗' }}</span>
+          <span class="status-text">{{ simulateResult.matched ? '命中' : '未命中' }}</span>
+        </div>
+
+        <div class="match-details">
+          <div
+            v-for="(detail, index) in simulateResult.matchDetails"
+            :key="index"
+            :class="['match-detail-item', detail.passed ? 'passed' : 'failed']"
+          >
+            <span class="detail-icon">{{ detail.passed ? '✓' : '✗' }}</span>
+            <div class="detail-content">
+              <div class="detail-condition">{{ detail.condition }}</div>
+              <div class="detail-reason">{{ detail.reason }}</div>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="simulateResult.aggregationWindowStatus" class="window-status">
+          <el-divider content-position="left">聚合窗口状态</el-divider>
+          <div class="window-info">
+            <span>窗口内事件数: <strong>{{ simulateResult.aggregationWindowStatus.eventCount }}</strong></span>
+            <span v-if="simulateResult.aggregationWindowStatus.aggregateResult !== undefined">
+              聚合结果: <strong>{{ simulateResult.aggregationWindowStatus.aggregateResult?.toFixed(2) }}</strong>
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <template #footer>
+        <el-button @click="simulateDialogVisible = false">关闭</el-button>
+        <el-button type="primary" :loading="simulating" @click="doSimulate">执行测试</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog
       v-model="exportDialogVisible"
@@ -276,8 +411,11 @@ import dayjs from 'dayjs';
 import {
   rulesApi,
   templatesApi,
+  inhibitApi,
   Rule,
   ImportResult,
+  SimulateResult,
+  InhibitRuleItem,
 } from '@/services/apiEndpoints';
 import {
   Plus,
@@ -285,6 +423,7 @@ import {
   Download,
   InfoFilled,
   UploadFilled,
+  Delete,
 } from '@element-plus/icons-vue';
 
 const router = useRouter();
@@ -294,6 +433,21 @@ const selectedRuleIds = ref<string[]>([]);
 const selectedRules = computed(() =>
   rules.value.filter((r) => selectedRuleIds.value.includes(r.id))
 );
+
+const activeTab = ref('list');
+const inhibitRules = ref<InhibitRuleItem[]>([]);
+const highlightedNodeId = ref<string | null>(null);
+
+const simulateDialogVisible = ref(false);
+const simulating = ref(false);
+const simulateRule = ref<Rule | null>(null);
+const simulateResult = ref<SimulateResult | null>(null);
+const simulateForm = reactive({
+  metricName: '',
+  value: undefined as number | undefined,
+  labels: [] as Array<{ key: string; value: string }>,
+  timestamp: '',
+});
 
 const exportDialogVisible = ref(false);
 const exportMode = ref<'all' | 'selected'>('all');
@@ -374,6 +528,15 @@ async function loadRules() {
   }
 }
 
+async function loadInhibitRules() {
+  try {
+    const response = await inhibitApi.getInhibitRules();
+    inhibitRules.value = response.data;
+  } catch (error) {
+    console.error('Failed to load inhibit rules:', error);
+  }
+}
+
 async function loadSceneTags() {
   try {
     const response = await templatesApi.getSceneTags();
@@ -381,6 +544,128 @@ async function loadSceneTags() {
   } catch (error) {
     console.error('Failed to load scene tags:', error);
   }
+}
+
+interface GraphNode {
+  id: string;
+  name: string;
+  isEnabled: boolean;
+  x: number;
+  y: number;
+  width: number;
+  highlighted: boolean;
+}
+
+interface GraphEdge {
+  id: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  highlighted: boolean;
+  sourceId: string;
+  targetId: string;
+}
+
+const NODE_H_SPACING = 220;
+const NODE_V_SPACING = 100;
+const NODE_PADDING_X = 60;
+const NODE_PADDING_Y = 50;
+
+const graphNodes = computed<GraphNode[]>(() => {
+  const nodeIds = new Set<string>();
+
+  for (const ir of inhibitRules.value) {
+    for (const sm of ir.sourceMatchers) {
+      const rule = rules.value.find(r => r.name === sm.value);
+      if (rule) nodeIds.add(rule.id);
+    }
+    for (const tm of ir.targetMatchers) {
+      const rule = rules.value.find(r => r.name === tm.value);
+      if (rule) nodeIds.add(rule.id);
+    }
+  }
+
+  const nodes: GraphNode[] = [];
+  let col = 0;
+  let row = 0;
+  const cols = Math.ceil(Math.sqrt(nodeIds.size)) || 1;
+
+  for (const id of nodeIds) {
+    const rule = rules.value.find(r => r.id === id);
+    if (!rule) continue;
+    const nameLen = rule.name.length;
+    const width = Math.max(120, nameLen * 12 + 40);
+    const highlighted = highlightedNodeId.value === id || isNodeConnected(id);
+    nodes.push({
+      id: rule.id,
+      name: rule.name,
+      isEnabled: rule.isEnabled,
+      x: NODE_PADDING_X + col * NODE_H_SPACING + width / 2,
+      y: NODE_PADDING_Y + row * NODE_V_SPACING + 20,
+      width,
+      highlighted,
+    });
+    col++;
+    if (col >= cols) {
+      col = 0;
+      row++;
+    }
+  }
+  return nodes;
+});
+
+const graphEdges = computed<GraphEdge[]>(() => {
+  const edges: GraphEdge[] = [];
+  for (const ir of inhibitRules.value) {
+    const sourceRule = rules.value.find(r => r.name === ir.sourceMatchers[0]?.value);
+    const targetRule = rules.value.find(r => r.name === ir.targetMatchers[0]?.value);
+    if (!sourceRule || !targetRule) continue;
+
+    const srcNode = graphNodes.value.find(n => n.id === sourceRule.id);
+    const tgtNode = graphNodes.value.find(n => n.id === targetRule.id);
+    if (!srcNode || !tgtNode) continue;
+
+    const highlighted = highlightedNodeId.value === sourceRule.id || highlightedNodeId.value === targetRule.id;
+    edges.push({
+      id: ir.id,
+      x1: srcNode.x,
+      y1: srcNode.y + 20,
+      x2: tgtNode.x,
+      y2: tgtNode.y - 20,
+      highlighted,
+      sourceId: sourceRule.id,
+      targetId: targetRule.id,
+    });
+  }
+  return edges;
+});
+
+function isNodeConnected(nodeId: string): boolean {
+  if (!highlightedNodeId.value) return false;
+  for (const edge of graphEdges.value) {
+    if ((edge.sourceId === nodeId && edge.targetId === highlightedNodeId.value) ||
+        (edge.targetId === nodeId && edge.sourceId === highlightedNodeId.value)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+const svgWidth = computed(() => {
+  if (graphNodes.value.length === 0) return 800;
+  const maxX = Math.max(...graphNodes.value.map(n => n.x + n.width / 2));
+  return maxX + NODE_PADDING_X;
+});
+
+const svgHeight = computed(() => {
+  if (graphNodes.value.length === 0) return 400;
+  const maxY = Math.max(...graphNodes.value.map(n => n.y + 20));
+  return maxY + NODE_PADDING_Y;
+});
+
+function highlightNode(id: string) {
+  highlightedNodeId.value = highlightedNodeId.value === id ? null : id;
 }
 
 function handleSelectionChange(selection: Rule[]) {
@@ -509,6 +794,61 @@ function closeImportResult() {
   importResult.value = null;
 }
 
+function openSimulateDialog(rule: Rule) {
+  simulateRule.value = rule;
+  simulateResult.value = null;
+  simulateForm.metricName = '';
+  simulateForm.value = undefined;
+  simulateForm.labels = [];
+  simulateForm.timestamp = '';
+
+  const conditions = rule.conditions?.conditions || [];
+  for (const c of conditions) {
+    if (c.metric) {
+      simulateForm.metricName = c.metric;
+    }
+    if (c.label) {
+      simulateForm.labels.push({ key: c.label, value: c.labelValue || '' });
+    }
+  }
+
+  simulateDialogVisible.value = true;
+}
+
+function addSimulateLabel() {
+  simulateForm.labels.push({ key: '', value: '' });
+}
+
+function removeSimulateLabel(index: number) {
+  simulateForm.labels.splice(index, 1);
+}
+
+async function doSimulate() {
+  if (!simulateRule.value) return;
+
+  simulating.value = true;
+  try {
+    const labels: Record<string, string> = {};
+    for (const item of simulateForm.labels) {
+      if (item.key) {
+        labels[item.key] = item.value;
+      }
+    }
+
+    const response = await rulesApi.simulateRule(simulateRule.value.id, {
+      metricName: simulateForm.metricName || undefined,
+      value: simulateForm.value,
+      labels: Object.keys(labels).length > 0 ? labels : undefined,
+      timestamp: simulateForm.timestamp || undefined,
+    });
+    simulateResult.value = response.data;
+  } catch (error: any) {
+    ElMessage.error(error.response?.data?.message || '模拟测试失败');
+  } finally {
+    simulating.value = false;
+  }
+}
+
 function saveAsTemplate(rule: Rule) {
   currentRule.value = rule;
   templateForm.name = rule.name + '模板';
@@ -583,6 +923,7 @@ function editRule(rule: Rule) {
 onMounted(() => {
   loadRules();
   loadSceneTags();
+  loadInhibitRules();
 });
 </script>
 
@@ -782,5 +1123,201 @@ onMounted(() => {
 h2 {
   margin: 0;
   font-size: 18px;
+}
+
+.simulate-rule-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.simulate-rule-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.labels-input-area {
+  width: 100%;
+}
+
+.label-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.label-eq {
+  font-weight: bold;
+  color: #909399;
+}
+
+.simulate-result {
+  margin-top: 10px;
+}
+
+.simulate-match-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 20px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.simulate-match-status.matched {
+  background: #f0f9eb;
+  border: 1px solid #e1f3d8;
+}
+
+.simulate-match-status.not-matched {
+  background: #fef0f0;
+  border: 1px solid #fde2e2;
+}
+
+.status-icon {
+  font-size: 28px;
+  font-weight: bold;
+}
+
+.matched .status-icon {
+  color: #67c23a;
+}
+
+.not-matched .status-icon {
+  color: #f56c6c;
+}
+
+.status-text {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.matched .status-text {
+  color: #67c23a;
+}
+
+.not-matched .status-text {
+  color: #f56c6c;
+}
+
+.match-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.match-detail-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 6px;
+}
+
+.match-detail-item.passed {
+  background: #f0f9eb;
+}
+
+.match-detail-item.failed {
+  background: #fef0f0;
+}
+
+.detail-icon {
+  font-size: 16px;
+  font-weight: bold;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.passed .detail-icon {
+  color: #67c23a;
+}
+
+.failed .detail-icon {
+  color: #f56c6c;
+}
+
+.detail-content {
+  flex: 1;
+}
+
+.detail-condition {
+  font-size: 14px;
+  font-weight: 500;
+  color: #303133;
+  margin-bottom: 2px;
+}
+
+.detail-reason {
+  font-size: 12px;
+  color: #909399;
+}
+
+.window-status {
+  margin-top: 8px;
+}
+
+.window-info {
+  display: flex;
+  gap: 24px;
+  padding: 12px 16px;
+  background: #f5f7fa;
+  border-radius: 6px;
+  font-size: 14px;
+  color: #606266;
+}
+
+.dep-empty {
+  padding: 40px 0;
+}
+
+.dependency-graph-container {
+  overflow-x: auto;
+}
+
+.dependency-svg {
+  display: block;
+  min-height: 200px;
+}
+
+.graph-node {
+  cursor: pointer;
+}
+
+.graph-node:hover rect {
+  filter: brightness(0.95);
+}
+
+.graph-legend {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: #606266;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.legend-dot.enabled {
+  background: #67c23a;
+}
+
+.legend-dot.disabled {
+  background: #909399;
 }
 </style>

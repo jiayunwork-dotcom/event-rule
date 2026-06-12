@@ -129,6 +129,24 @@ export class AlertsController {
     );
   }
 
+  @Post('batch/acknowledge')
+  @ApiOperation({ summary: 'Batch acknowledge alerts (pending only)' })
+  async batchAcknowledge(
+    @CurrentUser() ctx: TenantContext,
+    @Body() body: { ids: string[] },
+  ) {
+    return this.alertsService.batchAcknowledge(ctx.tenantId, body.ids, ctx.userId || null);
+  }
+
+  @Post('batch/resolve')
+  @ApiOperation({ summary: 'Batch resolve alerts (processing only)' })
+  async batchResolve(
+    @CurrentUser() ctx: TenantContext,
+    @Body() body: { ids: string[]; resolvedReason: string },
+  ) {
+    return this.alertsService.batchResolve(ctx.tenantId, body.ids, body.resolvedReason, ctx.userId || null);
+  }
+
   @Get('silences')
   @ApiOperation({ summary: 'Get all silences' })
   async getSilences(@CurrentUser() ctx: TenantContext): Promise<Silence[]> {

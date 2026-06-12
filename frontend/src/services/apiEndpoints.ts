@@ -125,6 +125,40 @@ export interface AlertHistoryItem {
   createdAt: string;
 }
 
+export interface SimulateResult {
+  matched: boolean;
+  matchDetails: Array<{ condition: string; passed: boolean; reason: string }>;
+  aggregationWindowStatus?: { eventCount: number; aggregateResult?: number };
+}
+
+export interface NotificationItem {
+  id: string;
+  tenantId: string;
+  alertId: string;
+  channelId: string;
+  channelType: string;
+  recipient: string;
+  content: string;
+  status: string;
+  retryCount: number;
+  maxRetries: number;
+  nextRetryAt?: string;
+  errorMessage?: string;
+  sentAt?: string;
+  createdAt: string;
+}
+
+export interface InhibitRuleItem {
+  id: string;
+  tenantId: string;
+  name: string;
+  sourceMatchers: Array<{ label: string; value: string; type: string }>;
+  targetMatchers: Array<{ label: string; value: string; type: string }>;
+  equalLabels: string[];
+  isEnabled: boolean;
+  createdAt: string;
+}
+
 export const alertsApi = {
   getAlerts: (params?: any) => api.get<Alert[]>('/api/v1/alerts', { params }),
   getAlertsGrouped: (params?: any) => api.get<AlertGroup[]>('/api/v1/alerts/grouped', { params }),
@@ -136,6 +170,10 @@ export const alertsApi = {
     api.post<Alert>(`/api/v1/alerts/${id}/process`, { remark }),
   resolve: (id: string, remark?: string, resolvedReason?: string) =>
     api.post<Alert>(`/api/v1/alerts/${id}/resolve`, { remark, resolvedReason }),
+  batchAcknowledge: (ids: string[]) =>
+    api.post<{ operated: number; skipped: number; details: Array<{ id: string; success: boolean; reason: string }> }>('/api/v1/alerts/batch/acknowledge', { ids }),
+  batchResolve: (ids: string[], resolvedReason: string) =>
+    api.post<{ operated: number; skipped: number; details: Array<{ id: string; success: boolean; reason: string }> }>('/api/v1/alerts/batch/resolve', { ids, resolvedReason }),
 };
 
 export const rulesApi = {
@@ -150,6 +188,8 @@ export const rulesApi = {
   exportRules: (ruleIds?: string[]) => api.post('/api/v1/rules/export', { ruleIds }, { responseType: 'blob' }),
   importRules: (rules: any[], conflictStrategy: 'skip' | 'overwrite' | 'rename') =>
     api.post<ImportResult>('/api/v1/rules/import', { rules, conflictStrategy }),
+  simulateRule: (id: string, data: { metricName?: string; value?: number; labels?: Record<string, string>; timestamp?: string }) =>
+    api.post<SimulateResult>(`/api/v1/rules/${id}/simulate`, data),
 };
 
 export const templatesApi = {
@@ -215,6 +255,8 @@ export const schedulesApi = {
 export const notificationsApi = {
   getNotifications: (params?: any) => api.get('/api/v1/notifications', { params }),
   getDeadLetters: () => api.get('/api/v1/dead-letters'),
+  getNotificationsByAlertId: (alertId: string) => api.get<NotificationItem[]>(`/api/v1/notifications/alert/${alertId}`),
+  retryNotification: (id: string) => api.post<NotificationItem>(`/api/v1/notifications/${id}/retry`),
 };
 
 export const sourcesApi = {

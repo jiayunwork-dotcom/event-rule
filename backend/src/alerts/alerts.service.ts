@@ -481,6 +481,71 @@ export class AlertsService {
     }
   }
 
+  async batchAcknowledge(
+    tenantId: string,
+    alertIds: string[],
+    userId: string | null,
+  ): Promise<{ operated: number; skipped: number; details: Array<{ id: string; success: boolean; reason: string }> }> {
+    const result = { operated: 0, skipped: 0, details: [] as Array<{ id: string; success: boolean; reason: string }> };
+
+    for (const id of alertIds) {
+      try {
+        const alert = await this.alertRepository.findOne({ where: { id, tenantId } });
+        if (!alert) {
+          result.skipped++;
+          result.details.push({ id, success: false, reason: '告警不存在' });
+          continue;
+        }
+        if (alert.status !== AlertStatus.PENDING) {
+          result.skipped++;
+          result.details.push({ id, success: false, reason: `当前状态为 ${alert.status}, 仅 pending 状态可确认` });
+          continue;
+        }
+        await this.updateAlertStatus(tenantId, id, { status: AlertStatus.ACKNOWLEDGED, remark: '批量确认' }, userId);
+        result.operated++;
+        result.details.push({ id, success: true, reason: '已确认' });
+      } catch (error: any) {
+        result.skipped++;
+        result.details.push({ id, success: false, reason: error.message || '操作失败' });
+      }
+    }
+
+    return result;
+  }
+
+  async batchResolve(
+    tenantId: string,
+    alertIds: string[],
+    resolvedReason: string,
+    userId: string | null,
+  ): Promise<{ operated: number; skipped: number; details: Array<{ id: string; success: boolean; reason: string }> }> {
+    const result = { operated: 0, skipped: 0, details: [] as Array<{ id: string; success: boolean; reason: string }> };
+
+    for (const id of alertIds) {
+      try {
+        const alert = await this.alertRepository.findOne({ where: { id, tenantId } });
+        if (!alert) {
+          result.skipped++;
+          result.details.push({ id, success: false, reason: '告警不存在' });
+          continue;
+        }
+        if (alert.status !== AlertStatus.PROCESSING) {
+          result.skipped++;
+          result.details.push({ id, success: false, reason: `当前状态为 ${alert.status}, 仅 processing 状态可标记解决` });
+          continue;
+        }
+        await this.updateAlertStatus(tenantId, id, { status: AlertStatus.RESOLVED, remark: '批量解决', resolvedReason }, userId);
+        result.operated++;
+        result.details.push({ id, success: true, reason: '已解决' });
+      } catch (error: any) {
+        result.skipped++;
+        result.details.push({ id, success: false, reason: error.message || '操作失败' });
+      }
+    }
+
+    return result;
+  }
+
   async getSilences(tenantId: string): Promise<Silence[]> {
     return this.silenceRepository.find({ 
       where: { tenantId },
