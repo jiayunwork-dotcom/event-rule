@@ -159,6 +159,64 @@ export interface InhibitRuleItem {
   createdAt: string;
 }
 
+export interface RuleVersion {
+  id: string;
+  ruleId: string;
+  versionNumber: number;
+  snapshot: any;
+  changeSummary: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface DiffField {
+  field: string;
+  type: 'added' | 'removed' | 'modified';
+  oldValue?: any;
+  newValue?: any;
+  addedItems?: any[];
+  removedItems?: any[];
+}
+
+export interface DiffResult {
+  added: number;
+  removed: number;
+  modified: number;
+  fields: DiffField[];
+}
+
+export interface VersionDiffResult {
+  versionA: RuleVersion;
+  versionB: RuleVersion;
+  diff: DiffResult;
+}
+
+export interface BatchRollbackResult {
+  success: string[];
+  failed: Array<{ ruleId: string; reason: string }>;
+}
+
+export interface LockCheckResult {
+  lockedRuleIds: string[];
+}
+
+export const versionsApi = {
+  getVersions: (ruleId: string, params?: { startTime?: string; endTime?: string; createdBy?: string }) =>
+    api.get<RuleVersion[]>(`/api/v1/rules/${ruleId}/versions`, { params }),
+  getVersion: (ruleId: string, versionId: string) =>
+    api.get<RuleVersion>(`/api/v1/rules/${ruleId}/versions/${versionId}`),
+  getVersionCreators: (ruleId: string) =>
+    api.get<string[]>(`/api/v1/rules/${ruleId}/versions/creators`),
+  diffVersions: (ruleId: string, versionIdA: string, versionIdB: string) =>
+    api.post<VersionDiffResult>(`/api/v1/rules/${ruleId}/versions/diff`, { versionIdA, versionIdB }),
+  rollback: (ruleId: string, versionId: string, rolledBackBy: string) =>
+    api.post<Rule>(`/api/v1/rules/${ruleId}/versions/${versionId}/rollback`, { rolledBackBy }),
+  batchRollback: (ruleIds: string[], rolledBackBy: string) =>
+    api.post<BatchRollbackResult>('/api/v1/rule-versions/batch-rollback', { ruleIds, rolledBackBy }),
+  checkLocks: (ruleIds: string[]) =>
+    api.post<LockCheckResult>('/api/v1/rules/check-locks', { ruleIds }),
+};
+
 export const alertsApi = {
   getAlerts: (params?: any) => api.get<Alert[]>('/api/v1/alerts', { params }),
   getAlertsGrouped: (params?: any) => api.get<AlertGroup[]>('/api/v1/alerts/grouped', { params }),

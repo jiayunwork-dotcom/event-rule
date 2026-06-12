@@ -4,6 +4,15 @@
       <div class="flex justify-between items-center">
         <h2>规则管理</h2>
         <div class="header-actions">
+          <el-button
+            v-if="selectedRuleIds.length > 0"
+            type="warning"
+            @click="batchRollback"
+            :loading="batchRollbacking"
+          >
+            <el-icon><RefreshLeft /></el-icon>
+            批量回滚 ({{ selectedRuleIds.length }})
+          </el-button>
           <el-button @click="openImportDialog">
             <el-icon><Upload /></el-icon>
             导入规则
@@ -26,7 +35,16 @@
           <el-table-column width="55" type="selection" />
           <el-table-column width="60" type="index" />
           
-          <el-table-column prop="name" label="规则名称" min-width="150" show-overflow-tooltip />
+          <el-table-column prop="name" label="规则名称" min-width="150" show-overflow-tooltip>
+            <template #default="{ row }">
+              <span class="rule-name-cell">
+                <el-tooltip v-if="lockedRuleIds.has(row.id)" content="该规则正在回滚中" placement="top">
+                  <el-icon class="lock-icon"><Lock /></el-icon>
+                </el-tooltip>
+                {{ row.name }}
+              </span>
+            </template>
+          </el-table-column>
           
           <el-table-column prop="description" label="描述" min-width="200" show-overflow-tooltip />
           
@@ -68,7 +86,12 @@
               <el-button type="warning" size="small" @click="openSimulateDialog(row)">
                 模拟测试
               </el-button>
-              <el-button type="primary" size="small" @click="editRule(row)">
+              <el-tooltip v-if="lockedRuleIds.has(row.id)" content="该规则正在回滚中，请稍后再试" placement="top">
+                <span>
+                  <el-button type="primary" size="small" disabled>编辑</el-button>
+                </span>
+              </el-tooltip>
+              <el-button v-else type="primary" size="small" @click="editRule(row)">
                 编辑
               </el-button>
               <el-button type="success" size="small" @click="saveAsTemplate(row)">
@@ -412,6 +435,7 @@ import {
   rulesApi,
   templatesApi,
   inhibitApi,
+  versionsApi,
   Rule,
   ImportResult,
   SimulateResult,
@@ -424,6 +448,8 @@ import {
   InfoFilled,
   UploadFilled,
   Delete,
+  RefreshLeft,
+  Lock,
 } from '@element-plus/icons-vue';
 
 const router = useRouter();
@@ -470,6 +496,9 @@ const templateForm = reactive({
   sceneTags: [] as string[],
 });
 const sceneTagOptions = ref<string[]>([]);
+
+const lockedRuleIds = ref<Set<string>>(new Set());
+const batchRollbacking = ref(false);
 
 function formatTime(time: string) {
   return dayjs(time).format('YYYY-MM-DD HH:mm:ss');
@@ -912,6 +941,54 @@ async function deleteRule(rule: Rule) {
   }
 }
 
+async function checkLocks() {
+  if (rules.value.length === 0) return;
+  try {
+    const allRuleIds = rules.value.map(r => r.id);
+    const response = await versionsApi.checkLocks(allRuleIds);
+    lockedRuleIds.value = new Set(response.data.lockedRuleIds);
+  } catch (error) {
+    console.error('Failed to check locks:', error);
+  }
+}
+
+async function batchRollback() {
+  if (selectedRuleIds.value.length === 0) {
+    ElMessage.warning('请先选择要回滚的规则');
+    return;
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确定要将选中的 ${selectedRuleIds.value.length} 条规则回滚到各自的上一个版本吗？`,
+      '批量回滚确认',
+      { type: 'warning', confirmButtonText: '确定回滚', cancelButtonText: '取消' },
+    );
+
+    batchRollbacking.value = true;
+    const response = await versionsApi.batchRollback(selectedRuleIds.value, 'current_user');
+    const result = response.data;
+
+    if (result.failed.length > 0) {
+      ElMessage.warning(`批量回滚完成: ${result.success.length} 条成功, ${result.failed.length} 条失败`);
+      for (const item of result.failed) {
+        const rule = rules.value.find(r => r.id === item.ruleId);
+        console.warn(`规则 ${rule?.name || item.ruleId} 回滚失败: ${item.reason}`);
+      }
+    } else {
+      ElMessage.success(`批量回滚成功，共回滚 ${result.success.length} 条规则`);
+    }
+
+    loadRules();
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error(error.response?.data?.message || '批量回滚失败');
+    }
+  } finally {
+    batchRollbacking.value = false;
+  }
+}
+
 function goToCreate() {
   router.push('/rules/new');
 }
@@ -924,6 +1001,7 @@ onMounted(() => {
   loadRules();
   loadSceneTags();
   loadInhibitRules();
+  checkLocks();
 });
 </script>
 
@@ -1319,5 +1397,17 @@ h2 {
 
 .legend-dot.disabled {
   background: #909399;
+}
+
+.rule-name-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.lock-icon {
+  color: #e6a23c;
+  font-size: 14px;
+  flex-shrink: 0;
 }
 </style>

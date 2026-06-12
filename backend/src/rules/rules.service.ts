@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, OnModuleInit, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
@@ -8,6 +8,7 @@ import { validateConditions } from '../common/types/event.type';
 import { RedisService } from '../common/services/redis.service';
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { RuleVersionsService } from './rule-versions.service';
 
 export interface Condition {
   type: 'threshold' | 'label' | 'frequency' | 'window' | 'sequence';
@@ -62,6 +63,8 @@ export class RulesService implements OnModuleInit {
   constructor(
     @InjectRepository(Rule)
     private readonly ruleRepository: Repository<Rule>,
+    @Inject(forwardRef(() => RuleVersionsService))
+    private readonly versionsService: RuleVersionsService,
     private readonly eventEmitter: EventEmitter2,
     private readonly redisService: RedisService,
     private readonly configService: ConfigService,
@@ -438,8 +441,6 @@ export class RulesService implements OnModuleInit {
   }
 
   async create(tenantId: string, dto: CreateRuleDto): Promise<Rule> {
-    const ruleCount = await this.ruleRepository.count({ where: { tenantId } });
-    
     if (dto.conditionType !== ConditionType.DSL) {
       validateConditions(dto.conditions.conditions);
     }
@@ -451,7 +452,13 @@ export class RulesService implements OnModuleInit {
     
     const saved = await this.ruleRepository.save(rule);
     await this.refreshRulesCache(tenantId);
-    
+
+    try {
+      await this.versionsService.createVersion(saved.id, saved, '创建规则', 'system');
+    } catch (error) {
+      this.logger.error(`Failed to create version for rule ${saved.id}`, error);
+    }
+
     this.eventEmitter.emit('rule.created', { tenantId, rule: saved });
     
     return saved;
@@ -459,18 +466,66 @@ export class RulesService implements OnModuleInit {
 
   async update(tenantId: string, id: string, dto: Partial<CreateRuleDto>): Promise<Rule> {
     const rule = await this.findOne(tenantId, id);
+
+    const isLocked = await this.versionsService.isRuleLocked(id);
+    if (isLocked) {
+      throw new BadRequestException('该规则正在回滚中，请稍后再试');
+    }
     
     if (dto.conditions && dto.conditionType !== ConditionType.DSL) {
       validateConditions(dto.conditions.conditions);
     }
 
+    const changeSummary = this.generateChangeSummary(rule, dto);
+
     Object.assign(rule, dto);
     const saved = await this.ruleRepository.save(rule);
     await this.refreshRulesCache(tenantId);
+
+    try {
+      await this.versionsService.createVersion(saved.id, saved, changeSummary, 'system');
+    } catch (error) {
+      this.logger.error(`Failed to create version for rule ${saved.id}`, error);
+    }
     
     this.eventEmitter.emit('rule.updated', { tenantId, rule: saved });
     
     return saved;
+  }
+
+  private generateChangeSummary(oldRule: Rule, dto: Partial<CreateRuleDto>): string {
+    const changes: string[] = [];
+    if (dto.name !== undefined && dto.name !== oldRule.name) {
+      changes.push(`名称从"${oldRule.name}"改为"${dto.name}"`);
+    }
+    if (dto.severity !== undefined && dto.severity !== oldRule.severity) {
+      changes.push(`严重程度从${oldRule.severity}改为${dto.severity}`);
+    }
+    if (dto.priority !== undefined && dto.priority !== oldRule.priority) {
+      changes.push(`优先级从${oldRule.priority}改为${dto.priority}`);
+    }
+    if (dto.isEnabled !== undefined && dto.isEnabled !== oldRule.isEnabled) {
+      changes.push(dto.isEnabled ? '启用规则' : '禁用规则');
+    }
+    if (dto.conditionType !== undefined && dto.conditionType !== oldRule.conditionType) {
+      changes.push(`条件类型从${oldRule.conditionType}改为${dto.conditionType}`);
+    }
+    if (dto.conditions !== undefined && JSON.stringify(dto.conditions) !== JSON.stringify(oldRule.conditions)) {
+      changes.push('修改了条件配置');
+    }
+    if (dto.dsl !== undefined && dto.dsl !== oldRule.dsl) {
+      changes.push('修改了DSL规则');
+    }
+    if (dto.windowSize !== undefined && dto.windowSize !== oldRule.windowSize) {
+      changes.push(`窗口大小从${oldRule.windowSize}改为${dto.windowSize}`);
+    }
+    if (dto.description !== undefined && dto.description !== oldRule.description) {
+      changes.push('修改了描述');
+    }
+    if (changes.length === 0) {
+      changes.push('更新规则');
+    }
+    return changes.join('，');
   }
 
   async remove(tenantId: string, id: string): Promise<void> {
@@ -485,11 +540,36 @@ export class RulesService implements OnModuleInit {
     this.rulesCache.set(tenantId, rules);
   }
 
+  @OnEvent('rule.rolledback')
+  async handleRollback(payload: { tenantId: string; rule: Rule }) {
+    const { tenantId, rule } = payload;
+    await this.refreshRulesCache(tenantId);
+    this.eventEmitter.emit('rule.updated', { tenantId, rule });
+    this.logger.log(`Rule ${rule.name} rolled back, cache refreshed`);
+  }
+
   async toggleEnabled(tenantId: string, id: string, isEnabled: boolean): Promise<Rule> {
+    const isLocked = await this.versionsService.isRuleLocked(id);
+    if (isLocked) {
+      throw new BadRequestException('该规则正在回滚中，请稍后再试');
+    }
+
     const rule = await this.findOne(tenantId, id);
     rule.isEnabled = isEnabled;
     const saved = await this.ruleRepository.save(rule);
     await this.refreshRulesCache(tenantId);
+
+    try {
+      await this.versionsService.createVersion(
+        saved.id,
+        saved,
+        isEnabled ? '启用规则' : '禁用规则',
+        'system',
+      );
+    } catch (error) {
+      this.logger.error(`Failed to create version for rule ${saved.id}`, error);
+    }
+
     return saved;
   }
 

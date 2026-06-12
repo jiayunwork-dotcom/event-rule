@@ -4,6 +4,10 @@
       <div class="flex justify-between items-center">
         <h2>{{ isEdit ? '编辑规则' : '创建规则' }}</h2>
         <div>
+          <el-button v-if="isEdit" type="info" @click="versionHistoryVisible = true">
+            <el-icon><Clock /></el-icon>
+            版本历史
+          </el-button>
           <el-button @click="goBack">取消</el-button>
           <el-button type="primary" @click="saveRule" :loading="saving">
             保存
@@ -354,6 +358,12 @@
         </div>
       </el-col>
     </el-row>
+
+    <VersionHistory
+      v-model:visible="versionHistoryVisible"
+      :rule-id="ruleId"
+      @rolled-back="onVersionRollback"
+    />
   </div>
 </template>
 
@@ -361,16 +371,20 @@
 import { ref, reactive, onMounted, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
+import { Clock } from '@element-plus/icons-vue';
 import { rulesApi, Rule } from '@/services/apiEndpoints';
+import VersionHistory from './components/VersionHistory.vue';
 
 const route = useRoute();
 const router = useRouter();
 
 const isEdit = computed(() => !!route.params.id);
+const ruleId = computed(() => route.params.id as string);
 const saving = ref(false);
 const editMode = ref<'visual' | 'dsl'>('visual');
 const dslValidated = ref(false);
 const dslValid = ref(false);
+const versionHistoryVisible = ref(false);
 
 const commonMetrics = ['cpu_usage', 'memory_usage', 'disk_usage', 'network_usage', 'error_count', 'request_count', 'response_time'];
 const commonLabels = ['host', 'service', 'environment', 'instance', 'job', 'team'];
@@ -572,6 +586,13 @@ async function saveRule() {
 
 function goBack() {
   router.push('/rules');
+}
+
+async function onVersionRollback() {
+  if (isEdit.value) {
+    await loadRule(ruleId.value);
+    ElMessage.success('规则已回滚，页面已刷新');
+  }
 }
 
 onMounted(() => {
