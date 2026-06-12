@@ -182,7 +182,7 @@
                 @change="handleSpeedChange"
                 style="width: 180px"
               />
-              <span class="speed-value">{{ currentSpeed }}x</span>
+              <span class="speed-value">{{ formattedSpeed }}</span>
             </div>
           </div>
         </div>
@@ -688,6 +688,7 @@ const currentReplaySessionId = ref<string | null>(null);
 const replayMode = ref<ReplayMode>('real_time');
 const progress = ref<ReplayProgress | null>(null);
 const currentSpeed = ref(1);
+const formattedSpeed = computed(() => currentSpeed.value.toFixed(1) + 'x');
 const showBreakpointTriggered = ref(false);
 const comparisonReport = ref<ComparisonReport | null>(null);
 const hotSwapReport = ref<HotSwapDiffReport | null>(null);

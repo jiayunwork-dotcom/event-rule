@@ -39,17 +39,10 @@
                       <el-table-column prop="ruleId" label="规则ID" width="200" />
                       <el-table-column label="条件详情">
                         <template #default="{ row: detail }">
-                          <div v-if="detail.matchDetail?.conditions?.length" class="cond-list">
-                            <div
-                              v-for="(c, idx) in detail.matchDetail.conditions"
-                              :key="idx"
-                              class="cond-item"
-                              :class="c.passed ? 'passed' : 'failed'"
-                            >
-                              <el-icon><component :is="c.passed ? 'CircleCheck' : 'CircleClose'" /></el-icon>
-                              <span>{{ c.condition }} - {{ c.reason }}</span>
-                            </div>
+                          <div v-if="detail.matchDetail" class="detail-json">
+                            <pre>{{ formatJson(detail.matchDetail) }}</pre>
                           </div>
+                          <span v-else class="no-detail">无详情</span>
                         </template>
                       </el-table-column>
                     </el-table>
@@ -81,17 +74,10 @@
                       <el-table-column prop="ruleId" label="规则ID" width="200" />
                       <el-table-column label="条件详情">
                         <template #default="{ row: detail }">
-                          <div v-if="detail.matchDetail?.conditions?.length" class="cond-list">
-                            <div
-                              v-for="(c, idx) in detail.matchDetail.conditions"
-                              :key="idx"
-                              class="cond-item"
-                              :class="c.passed ? 'passed' : 'failed'"
-                            >
-                              <el-icon><component :is="c.passed ? 'CircleCheck' : 'CircleClose'" /></el-icon>
-                              <span>{{ c.condition }} - {{ c.reason }}</span>
-                            </div>
+                          <div v-if="detail.matchDetail" class="detail-json">
+                            <pre>{{ formatJson(detail.matchDetail) }}</pre>
                           </div>
+                          <span v-else class="no-detail">无详情</span>
                         </template>
                       </el-table-column>
                     </el-table>
@@ -105,7 +91,7 @@
       <el-table-column label="事件ID" prop="eventId" width="260" show-overflow-tooltip />
       <el-table-column label="事件来源" width="120">
         <template #default="{ row }">
-          {{ row.eventSource || '-' }}
+          {{ row.eventPayload?.source || row.eventSource || '-' }}
         </template>
       </el-table-column>
       <el-table-column label="指标名称" width="140">
@@ -169,7 +155,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import { Clock, Setting, CircleCheck, CircleClose } from '@element-plus/icons-vue';
+import { Clock, Setting } from '@element-plus/icons-vue';
 import type { HotSwapDiffItem } from '@/services/apiEndpoints';
 
 const props = defineProps<{
@@ -286,28 +272,26 @@ function formatJson(obj: any) {
   margin-bottom: 8px;
 }
 
-.cond-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.cond-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  padding: 4px 6px;
+.detail-json {
+  background: #fafafa;
   border-radius: 3px;
+  padding: 8px;
+  max-height: 150px;
+  overflow: auto;
 }
 
-.cond-item.passed {
-  color: #67c23a;
-  background: #f0f9eb;
+.detail-json pre {
+  margin: 0;
+  font-family: 'SF Mono', Consolas, Monaco, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: #606266;
 }
 
-.cond-item.failed {
-  color: #f56c6c;
-  background: #fef0f0;
+.no-detail {
+  color: #c0c4cc;
+  font-size: 12px;
 }
 </style>
