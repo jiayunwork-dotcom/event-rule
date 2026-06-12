@@ -271,6 +271,110 @@ export const sourcesApi = {
     api.post('/api/v1/events/metrics', data),
 };
 
+export interface ReplaySession {
+  id: string;
+  tenantId: string;
+  name: string;
+  description?: string;
+  startTime?: string;
+  endTime?: string;
+  status: 'recording' | 'stopped' | 'archived';
+  createdAt: string;
+}
+
+export interface ReplayEventItem {
+  id: string;
+  sessionId: string;
+  tenantId: string;
+  eventSource: string;
+  eventPayload: any;
+  originalMatchedRuleIds: string[];
+  originalTimestamp: string;
+  recordedAt: string;
+}
+
+export interface ReplayResultItem {
+  id: string;
+  sessionId: string;
+  eventId: string;
+  ruleId?: string;
+  matched: boolean;
+  matchDetail?: any;
+  replayedAt: string;
+}
+
+export interface ReplayProgress {
+  sessionId: string;
+  totalEvents: number;
+  replayedCount: number;
+  matchedCount: number;
+  hitRate: number;
+  currentEvent?: ReplayEventItem;
+  currentMatchResults?: ReplayResultItem[];
+  isPaused: boolean;
+  pauseReason?: string;
+  breakpointTriggeredEvent?: ReplayEventItem;
+  breakpointRuleMatches?: Array<{
+    ruleId: string;
+    ruleName: string;
+    matched: boolean;
+    reason: string;
+  }>;
+}
+
+export interface BreakpointCondition {
+  field: string;
+  operator: 'eq' | 'ne' | 'gt' | 'lt' | 'gte' | 'lte' | 'contains';
+  value: string | number;
+}
+
+export interface ComparisonDiffItem {
+  eventId: string;
+  eventPayload: any;
+  originalMatchedRuleIds: string[];
+  replayedMatchedRuleIds: string[];
+  originalMatchDetails?: any;
+  replayedMatchDetails?: any;
+  diffType: 'missed' | 'false_positive' | 'rule_changed';
+}
+
+export interface ComparisonReport {
+  sessionId: string;
+  totalEvents: number;
+  missedCount: number;
+  falsePositiveCount: number;
+  ruleChangedCount: number;
+  consistentCount: number;
+  missedEvents: ComparisonDiffItem[];
+  falsePositiveEvents: ComparisonDiffItem[];
+  ruleChangedEvents: ComparisonDiffItem[];
+}
+
+export type ReplayMode = 'real_time' | 'accelerated' | 'single_step';
+
+export const replayApi = {
+  listSessions: (params?: { page?: number; pageSize?: number; keyword?: string }) =>
+    api.get<{ items: ReplaySession[]; total: number; page: number; pageSize: number }>('/api/v1/replay/sessions', { params }),
+  getSession: (id: string) => api.get<ReplaySession>(`/api/v1/replay/sessions/${id}`),
+  startRecording: (data: { name: string; description?: string }) =>
+    api.post<ReplaySession>('/api/v1/replay/sessions', data),
+  stopRecording: (id: string) => api.post<ReplaySession>(`/api/v1/replay/sessions/${id}/stop`),
+  archiveSession: (id: string) => api.post<ReplaySession>(`/api/v1/replay/sessions/${id}/archive`),
+  deleteSession: (id: string) => api.delete(`/api/v1/replay/sessions/${id}`),
+  getSessionEvents: (id: string, params?: { page?: number; pageSize?: number }) =>
+    api.get<{ items: ReplayEventItem[]; total: number }>(`/api/v1/replay/sessions/${id}/events`, { params }),
+  startReplay: (id: string, data: { mode: ReplayMode; speedMultiplier?: number }) =>
+    api.post<ReplayProgress>(`/api/v1/replay/sessions/${id}/replay/start`, data),
+  singleStepNext: (id: string) => api.post<ReplayProgress>(`/api/v1/replay/sessions/${id}/replay/step`),
+  pauseReplay: (id: string) => api.post<ReplayProgress>(`/api/v1/replay/sessions/${id}/replay/pause`),
+  resumeReplay: (id: string) => api.post<ReplayProgress>(`/api/v1/replay/sessions/${id}/replay/resume`),
+  stopReplay: (id: string) => api.post(`/api/v1/replay/sessions/${id}/replay/stop`),
+  getProgress: (id: string) => api.get<ReplayProgress>(`/api/v1/replay/sessions/${id}/replay/progress`),
+  setBreakpoints: (id: string, data: { conditions: BreakpointCondition[]; logicalOp?: 'AND' | 'OR' }) =>
+    api.post(`/api/v1/replay/sessions/${id}/replay/breakpoints`, data),
+  getComparisonReport: (id: string) => api.get<ComparisonReport>(`/api/v1/replay/sessions/${id}/comparison`),
+};
+
 export const tenantsApi = {
   getCurrentTenant: () => api.get('/api/v1/tenants/me'),
   regenerateApiKey: (id: string) => api.post(`/api/v1/tenants/${id}/regenerate-api-key`),

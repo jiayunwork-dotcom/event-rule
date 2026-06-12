@@ -96,6 +96,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Settings.vue'),
         meta: { title: '系统设置', icon: 'Tools', requiresAuth: true },
       },
+      {
+        path: 'debug',
+        name: 'DebugWorkbench',
+        component: () => import('@/views/DebugWorkbench.vue'),
+        meta: { title: '调试工作台', icon: 'Cpu', requiresAuth: true },
+      },
     ],
   },
 ];

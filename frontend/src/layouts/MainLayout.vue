@@ -64,7 +64,7 @@ import { useAuthStore } from '@/stores/auth';
 import { 
   DataAnalysis, Bell, Setting, Edit, Connection, 
   Clock, Warning, Message, Tickets, Calendar, Document, 
-  Tools, User, ArrowDown, Promotion, Collection
+  Tools, User, ArrowDown, Promotion, Collection, Cpu
 } from '@element-plus/icons-vue';
 
 const route = useRoute();
@@ -96,6 +96,7 @@ const menuItems = [
   { path: '/policies', title: '通知策略', icon: Tickets },
   { path: '/schedules', title: '值班排班', icon: Calendar },
   { path: '/notifications', title: '通知记录', icon: Document },
+  { path: '/debug', title: '调试工作台', icon: Cpu },
   { path: '/settings', title: '系统设置', icon: Tools },
 ];
 

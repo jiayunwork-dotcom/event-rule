@@ -15,6 +15,7 @@ import { AlertsModule } from './alerts/alerts.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { SchedulesModule } from './schedules/schedules.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { ReplayModule } from './replay/replay.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
     NotificationsModule,
     SchedulesModule,
     DashboardModule,
+    ReplayModule,
   ],
   providers: [
     {
