@@ -363,7 +363,7 @@ export const replayApi = {
   deleteSession: (id: string) => api.delete(`/api/v1/replay/sessions/${id}`),
   getSessionEvents: (id: string, params?: { page?: number; pageSize?: number }) =>
     api.get<{ items: ReplayEventItem[]; total: number }>(`/api/v1/replay/sessions/${id}/events`, { params }),
-  startReplay: (id: string, data: { mode: ReplayMode; speedMultiplier?: number }) =>
+  startReplay: (id: string, data: { mode: ReplayMode; speedMultiplier?: number; breakpoints?: BreakpointCondition[]; breakpointLogicalOp?: 'AND' | 'OR' }) =>
     api.post<ReplayProgress>(`/api/v1/replay/sessions/${id}/replay/start`, data),
   singleStepNext: (id: string) => api.post<ReplayProgress>(`/api/v1/replay/sessions/${id}/replay/step`),
   pauseReplay: (id: string) => api.post<ReplayProgress>(`/api/v1/replay/sessions/${id}/replay/pause`),

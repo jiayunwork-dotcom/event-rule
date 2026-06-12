@@ -24,6 +24,8 @@ export enum ReplayMode {
 export interface StartReplayDto {
   mode: ReplayMode;
   speedMultiplier?: number;
+  breakpoints?: BreakpointCondition[];
+  breakpointLogicalOp?: 'AND' | 'OR';
 }
 
 export interface BreakpointCondition {
@@ -309,8 +311,8 @@ export class ReplayService {
       events,
       currentIndex: 0,
       isPaused: false,
-      breakpoints: [],
-      breakpointLogicalOp: 'OR',
+      breakpoints: dto.breakpoints || [],
+      breakpointLogicalOp: dto.breakpointLogicalOp || 'OR',
     };
     this.activeReplays.set(sessionId, state);
 

@@ -74,7 +74,7 @@
                 <el-button type="success" size="small" :icon="VideoPlay" @click.stop="showReplayDialog(row)" :disabled="!!currentReplaySessionId">
                   回放
                 </el-button>
-                <el-button type="primary" size="small" :icon="Aim" @click.stop="showBreakpointDialog(row)" :disabled="!currentReplaySessionId || currentReplaySessionId !== row.id">
+                <el-button type="primary" size="small" :icon="Aim" @click.stop="showBreakpointDialog(row)">
                   设断点
                 </el-button>
                 <el-button type="info" size="small" :icon="Folder" @click.stop="handleArchive(row)">
@@ -103,7 +103,7 @@
       </div>
     </el-card>
 
-    <el-card class="middle-section" v-if="selectedSession || currentReplaySessionId">
+    <el-card class="middle-section">
       <template #header>
         <div class="header-row">
           <span class="section-title">
@@ -113,51 +113,59 @@
               当前会话: {{ selectedSession.name }}
             </span>
           </span>
-          <div class="header-actions" v-if="currentReplaySessionId">
-            <template v-if="replayMode === 'single_step'">
-              <el-button type="success" :icon="Right" @click="handleSingleStep" :disabled="!canStep">
-                下一条
+          <div class="header-actions">
+            <template v-if="currentReplaySessionId">
+              <el-button type="primary" :icon="Aim" @click="showBreakpointDialogForCurrentSession">
+                设断点
+              </el-button>
+              <template v-if="replayMode === 'single_step'">
+                <el-button type="success" :icon="Right" @click="handleSingleStep" :disabled="!canStep">
+                  下一条
+                </el-button>
+              </template>
+              <template v-else>
+                <el-button v-if="!progress?.isPaused" type="warning" :icon="VideoPause" @click="handlePause">
+                  暂停
+                </el-button>
+                <el-button v-else type="success" :icon="VideoPlay" @click="handleResume">
+                  继续
+                </el-button>
+              </template>
+              <el-button type="danger" :icon="Close" @click="handleStopReplay">
+                停止回放
               </el-button>
             </template>
-            <template v-else>
-              <el-button v-if="!progress?.isPaused" type="warning" :icon="VideoPause" @click="handlePause">
-                暂停
-              </el-button>
-              <el-button v-else type="success" :icon="VideoPlay" @click="handleResume">
-                继续
-              </el-button>
-            </template>
-            <el-button type="danger" :icon="Close" @click="handleStopReplay">
-              停止回放
+            <el-button v-else type="info" :icon="VideoPlay" :disabled="!selectedSession || selectedSession.status !== 'stopped'" @click="selectedSession && showReplayDialog(selectedSession)">
+              启动回放
             </el-button>
           </div>
         </div>
       </template>
 
-      <div class="progress-area">
+      <div v-if="currentReplaySessionId && progress" class="progress-area">
         <div class="progress-stats">
           <el-card shadow="hover" class="stat-card">
             <div class="stat-label">已回放</div>
-            <div class="stat-value primary">{{ progress?.replayedCount || 0 }} / {{ progress?.totalEvents || 0 }}</div>
+            <div class="stat-value primary">{{ progress.replayedCount }} / {{ progress.totalEvents }}</div>
           </el-card>
           <el-card shadow="hover" class="stat-card">
             <div class="stat-label">命中数</div>
-            <div class="stat-value success">{{ progress?.matchedCount || 0 }}</div>
+            <div class="stat-value success">{{ progress.matchedCount }}</div>
           </el-card>
           <el-card shadow="hover" class="stat-card">
             <div class="stat-label">命中率</div>
-            <div class="stat-value warning">{{ formatPercent(progress?.hitRate) }}</div>
+            <div class="stat-value warning">{{ formatPercent(progress.hitRate) }}</div>
           </el-card>
         </div>
 
         <el-progress
-          :percentage="progress ? (progress.totalEvents > 0 ? (progress.replayedCount / progress.totalEvents) * 100 : 0) : 0"
-          :status="progress?.replayedCount === progress?.totalEvents && progress?.totalEvents > 0 ? 'success' : undefined"
+          :percentage="progress.totalEvents > 0 ? (progress.replayedCount / progress.totalEvents) * 100 : 0"
+          :status="progress.replayedCount === progress.totalEvents && progress.totalEvents > 0 ? 'success' : undefined"
           :stroke-width="18"
           class="progress-bar"
         />
 
-        <el-card v-if="progress?.currentEvent" class="current-event-preview">
+        <el-card v-if="progress.currentEvent" class="current-event-preview">
           <template #header>
             <div class="header-row">
               <span>
@@ -183,16 +191,24 @@
           </div>
         </el-card>
       </div>
+
+      <div v-else class="empty-state">
+        <el-empty description="请从上方选择一个已停止的录制会话，然后点击\"启动回放\"开始调试">
+          <el-button type="primary" :icon="VideoPlay" :disabled="!selectedSession || selectedSession.status !== 'stopped'" @click="selectedSession && showReplayDialog(selectedSession)">
+            启动回放
+          </el-button>
+        </el-empty>
+      </div>
     </el-card>
 
-    <el-card v-if="comparisonReport" class="bottom-section">
+    <el-card class="bottom-section">
       <template #header>
         <div class="header-row">
           <span class="section-title">
             <el-icon><Files /></el-icon>
             规则对比报告
           </span>
-          <div class="report-stats">
+          <div v-if="comparisonReport" class="report-stats">
             <el-tag type="success" style="margin-right: 8px">
               一致: {{ comparisonReport.consistentCount }}
             </el-tag>
@@ -209,17 +225,22 @@
         </div>
       </template>
 
-      <el-tabs v-model="activeDiffTab" type="card">
-        <el-tab-pane label="漏报" name="missed">
-          <diff-table :items="comparisonReport.missedEvents" diff-type="missed" />
-        </el-tab-pane>
-        <el-tab-pane label="误报" name="false_positive">
-          <diff-table :items="comparisonReport.falsePositiveEvents" diff-type="false_positive" />
-        </el-tab-pane>
-        <el-tab-pane label="规则变更" name="rule_changed">
-          <diff-table :items="comparisonReport.ruleChangedEvents" diff-type="rule_changed" />
-        </el-tab-pane>
-      </el-tabs>
+      <div v-if="comparisonReport">
+        <el-tabs v-model="activeDiffTab" type="card">
+          <el-tab-pane label="漏报" name="missed">
+            <diff-table :items="comparisonReport.missedEvents" diff-type="missed" />
+          </el-tab-pane>
+          <el-tab-pane label="误报" name="false_positive">
+            <diff-table :items="comparisonReport.falsePositiveEvents" diff-type="false_positive" />
+          </el-tab-pane>
+          <el-tab-pane label="规则变更" name="rule_changed">
+            <diff-table :items="comparisonReport.ruleChangedEvents" diff-type="rule_changed" />
+          </el-tab-pane>
+        </el-tabs>
+      </div>
+      <div v-else class="empty-state">
+        <el-empty description="选择一个已停止的录制会话并完成回放后，将在此处显示规则对比报告" />
+      </div>
     </el-card>
 
     <el-dialog v-model="showCreateDialog" title="新建录制会话" width="480px">
@@ -237,7 +258,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showReplayDialogFlag" title="启动回放" width="480px">
+    <el-dialog v-model="showReplayDialogFlag" title="启动回放" width="560px">
       <el-form :model="replayForm" label-width="100px">
         <el-form-item label="回放模式" required>
           <el-radio-group v-model="replayForm.mode">
@@ -262,6 +283,42 @@
               />
             </el-option>
           </el-select>
+        </el-form-item>
+        <el-form-item label="断点设置">
+          <el-collapse v-model="replayBreakpointCollapse">
+            <el-collapse-item title="配置断点条件（可选）" name="breakpoints">
+              <div class="inline-breakpoint-tip">
+                <el-alert type="info" :closable="false" show-icon size="small">
+                  当事件 payload 中某个字段满足特定条件时自动暂停回放
+                </el-alert>
+              </div>
+              <div class="inline-breakpoint-logic">
+                <span style="font-size: 12px; color: #606266">逻辑:</span>
+                <el-radio-group v-model="replayForm.breakpointLogicalOp" size="small">
+                  <el-radio value="OR">任一满足</el-radio>
+                  <el-radio value="AND">全部满足</el-radio>
+                </el-radio-group>
+              </div>
+              <div
+                v-for="(cond, idx) in replayForm.breakpoints"
+                :key="idx"
+                class="inline-breakpoint-row"
+              >
+                <el-input v-model="cond.field" placeholder="字段路径 (如 metricName)" size="small" style="width: 160px" />
+                <el-select v-model="cond.operator" size="small" style="width: 90px">
+                  <el-option label="等于" value="eq" />
+                  <el-option label="大于" value="gt" />
+                  <el-option label="小于" value="lt" />
+                  <el-option label="包含" value="contains" />
+                </el-select>
+                <el-input v-model="cond.value" placeholder="值" size="small" style="width: 110px" />
+                <el-button type="danger" link :icon="Delete" size="small" @click="removeReplayBreakpoint(idx)" />
+              </div>
+              <el-button type="primary" plain :icon="Plus" size="small" @click="addReplayBreakpoint" style="margin-top: 8px">
+                添加条件
+              </el-button>
+            </el-collapse-item>
+          </el-collapse>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -382,7 +439,17 @@ const createForm = ref({ name: '', description: '' });
 const showReplayDialogFlag = ref(false);
 const replayTargetSession = ref<ReplaySession | null>(null);
 const startingReplay = ref(false);
-const replayForm = ref<{ mode: ReplayMode; speedMultiplier?: number }>({ mode: 'real_time' });
+const replayBreakpointCollapse = ref<string[]>([]);
+const replayForm = ref<{
+  mode: ReplayMode;
+  speedMultiplier?: number;
+  breakpoints: BreakpointCondition[];
+  breakpointLogicalOp: 'AND' | 'OR';
+}>({
+  mode: 'real_time',
+  breakpoints: [],
+  breakpointLogicalOp: 'OR',
+});
 const customSpeed = ref(2);
 
 const showBreakpointDialogFlag = ref(false);
@@ -534,18 +601,34 @@ async function handleDeleteSession(row: ReplaySession) {
 
 function showReplayDialog(row: ReplaySession) {
   replayTargetSession.value = row;
-  replayForm.value = { mode: 'real_time' };
+  replayForm.value = {
+    mode: 'real_time',
+    breakpoints: [],
+    breakpointLogicalOp: 'OR',
+  };
   customSpeed.value = 2;
+  replayBreakpointCollapse.value = [];
   showReplayDialogFlag.value = true;
+}
+
+function addReplayBreakpoint() {
+  replayForm.value.breakpoints.push({ field: '', operator: 'eq', value: '' });
+}
+
+function removeReplayBreakpoint(idx: number) {
+  replayForm.value.breakpoints.splice(idx, 1);
 }
 
 async function handleStartReplay() {
   if (!replayTargetSession.value) return;
   startingReplay.value = true;
   try {
+    const validBreakpoints = replayForm.value.breakpoints.filter((c) => c.field && c.value !== '');
     const { data } = await replayApi.startReplay(replayTargetSession.value.id, {
       mode: replayForm.value.mode,
       speedMultiplier: replayForm.value.speedMultiplier,
+      breakpoints: validBreakpoints.length > 0 ? validBreakpoints : undefined,
+      breakpointLogicalOp: validBreakpoints.length > 0 ? replayForm.value.breakpointLogicalOp : undefined,
     });
     currentReplaySessionId.value = replayTargetSession.value.id;
     replayMode.value = replayForm.value.mode;
@@ -559,6 +642,12 @@ async function handleStartReplay() {
     ElMessage.error(err?.response?.data?.message || '启动回放失败');
   } finally {
     startingReplay.value = false;
+  }
+}
+
+function showBreakpointDialogForCurrentSession() {
+  if (selectedSession.value) {
+    showBreakpointDialog(selectedSession.value);
   }
 }
 
@@ -906,5 +995,34 @@ onBeforeUnmount(() => {
 
 .rule-matches {
   margin-top: 16px;
+}
+
+.empty-state {
+  min-height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.empty-state :deep(.el-empty) {
+  padding: 20px 0;
+}
+
+.inline-breakpoint-tip {
+  margin-bottom: 12px;
+}
+
+.inline-breakpoint-logic {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.inline-breakpoint-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
 }
 </style>
