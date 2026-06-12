@@ -11,6 +11,7 @@ import {
   HttpStatus,
   Sse,
   MessageEvent,
+  Res,
 } from '@nestjs/common';
 import { CurrentTenant } from '../common/decorators/tenant.decorator';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
@@ -21,11 +22,15 @@ import {
   SetBreakpointsDto,
   ReplayProgress,
   ComparisonReport,
+  CreateBookmarkDto,
+  UpdateBookmarkDto,
 } from './replay.service';
 import { ReplaySession } from './replay-session.entity';
 import { ReplayEvent } from './replay-event.entity';
+import { ReplayBookmark } from './replay-bookmark.entity';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { fromEvent, map, Observable } from 'rxjs';
+import { Response } from 'express';
 
 @ApiTags('replay-debug')
 @ApiBearerAuth()
@@ -127,6 +132,16 @@ export class ReplayController {
     return this.replayService.startReplay(tenantId, id, dto);
   }
 
+  @Post('sessions/:id/replay/speed')
+  @ApiOperation({ summary: '动态调节回放速度' })
+  async setReplaySpeed(
+    @CurrentTenant() _tenantId: string,
+    @Param('id') id: string,
+    @Body() body: { speedMultiplier: number },
+  ): Promise<ReplayProgress> {
+    return this.replayService.setSpeed(id, body.speedMultiplier);
+  }
+
   @Post('sessions/:id/replay/step')
   @ApiOperation({ summary: '单步回放下一条事件' })
   async singleStepNext(
@@ -213,5 +228,91 @@ export class ReplayController {
     @Param('id') id: string,
   ): Promise<ComparisonReport> {
     return this.replayService.getComparisonReport(tenantId, id);
+  }
+
+  @Get('sessions/:id/comparison/hot-swap')
+  @ApiOperation({ summary: '获取规则热替换对比结果' })
+  async getHotSwapComparison(
+    @CurrentTenant() tenantId: string,
+    @Param('id') id: string,
+  ): Promise<ComparisonReport['hotSwapDiff']> {
+    return this.replayService.getHotSwapComparison(tenantId, id);
+  }
+
+  @Get('sessions/:id/export/json')
+  @ApiOperation({ summary: '导出对比报告为JSON' })
+  async exportReportJson(
+    @CurrentTenant() tenantId: string,
+    @Param('id') id: string,
+    @Res() res: Response,
+  ) {
+    const data = await this.replayService.exportReportJson(tenantId, id);
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="comparison-report-${id}.json"`);
+    res.send(JSON.stringify(data, null, 2));
+  }
+
+  @Get('sessions/:id/export/csv')
+  @ApiOperation({ summary: '导出对比报告为CSV' })
+  async exportReportCsv(
+    @CurrentTenant() tenantId: string,
+    @Param('id') id: string,
+    @Res() res: Response,
+  ) {
+    const csvContent = await this.replayService.exportReportCsv(tenantId, id);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="comparison-report-${id}.csv"`);
+    res.send('\uFEFF' + csvContent);
+  }
+
+  @Get('sessions/:id/bookmarks')
+  @ApiOperation({ summary: '获取回放书签列表' })
+  async listBookmarks(
+    @CurrentTenant() tenantId: string,
+    @Param('id') id: string,
+  ): Promise<ReplayBookmark[]> {
+    return this.replayService.listBookmarks(tenantId, id);
+  }
+
+  @Post('sessions/:id/bookmarks')
+  @ApiOperation({ summary: '创建回放书签' })
+  async createBookmark(
+    @CurrentTenant() tenantId: string,
+    @Param('id') id: string,
+    @Body() dto: CreateBookmarkDto,
+  ): Promise<ReplayBookmark> {
+    return this.replayService.createBookmark(tenantId, id, dto);
+  }
+
+  @Put('sessions/:id/bookmarks/:bookmarkId')
+  @ApiOperation({ summary: '更新回放书签（重命名）' })
+  async updateBookmark(
+    @CurrentTenant() tenantId: string,
+    @Param('id') id: string,
+    @Param('bookmarkId') bookmarkId: string,
+    @Body() dto: UpdateBookmarkDto,
+  ): Promise<ReplayBookmark> {
+    return this.replayService.updateBookmark(tenantId, id, bookmarkId, dto);
+  }
+
+  @Delete('sessions/:id/bookmarks/:bookmarkId')
+  @ApiOperation({ summary: '删除回放书签' })
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async deleteBookmark(
+    @CurrentTenant() tenantId: string,
+    @Param('id') id: string,
+    @Param('bookmarkId') bookmarkId: string,
+  ): Promise<void> {
+    return this.replayService.deleteBookmark(tenantId, id, bookmarkId);
+  }
+
+  @Get('sessions/:id/bookmarks/:bookmarkId')
+  @ApiOperation({ summary: '获取单个回放书签详情' })
+  async getBookmark(
+    @CurrentTenant() tenantId: string,
+    @Param('id') id: string,
+    @Param('bookmarkId') bookmarkId: string,
+  ): Promise<ReplayBookmark> {
+    return this.replayService.getBookmark(tenantId, id, bookmarkId);
   }
 }

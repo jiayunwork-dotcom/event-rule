@@ -311,6 +311,7 @@ export interface ReplayProgress {
   hitRate: number;
   currentEvent?: ReplayEventItem;
   currentMatchResults?: ReplayResultItem[];
+  currentCustomMatchResults?: Array<{ ruleId: string; ruleName: string; matched: boolean; matchDetail?: any }>;
   isPaused: boolean;
   pauseReason?: string;
   breakpointTriggeredEvent?: ReplayEventItem;
@@ -320,6 +321,51 @@ export interface ReplayProgress {
     matched: boolean;
     reason: string;
   }>;
+  speedMultiplier: number;
+}
+
+export interface CustomRuleSnapshot {
+  id?: string;
+  name: string;
+  conditionType: string;
+  conditions: any;
+  priority?: number;
+  isEnabled?: boolean;
+  severity?: string;
+}
+
+export interface HotSwapDiffItem {
+  eventId: string;
+  eventPayload: any;
+  eventSource?: string;
+  eventTimestamp?: string;
+  currentRuleIds: string[];
+  customRuleIds: string[];
+  currentMatchDetails?: any;
+  customMatchDetails?: any;
+  diffType: 'missed' | 'false_positive' | 'rule_changed';
+}
+
+export interface HotSwapDiffReport {
+  hasCustomRules: boolean;
+  totalEvents: number;
+  missedCount: number;
+  falsePositiveCount: number;
+  ruleChangedCount: number;
+  consistentCount: number;
+  missedEvents: HotSwapDiffItem[];
+  falsePositiveEvents: HotSwapDiffItem[];
+  ruleChangedEvents: HotSwapDiffItem[];
+}
+
+export interface ReplayBookmark {
+  id: string;
+  sessionId: string;
+  tenantId: string;
+  name: string;
+  eventIndex: number;
+  progressSnapshot: any;
+  createdAt: string;
 }
 
 export interface BreakpointCondition {
@@ -363,8 +409,10 @@ export const replayApi = {
   deleteSession: (id: string) => api.delete(`/api/v1/replay/sessions/${id}`),
   getSessionEvents: (id: string, params?: { page?: number; pageSize?: number }) =>
     api.get<{ items: ReplayEventItem[]; total: number }>(`/api/v1/replay/sessions/${id}/events`, { params }),
-  startReplay: (id: string, data: { mode: ReplayMode; speedMultiplier?: number; breakpoints?: BreakpointCondition[]; breakpointLogicalOp?: 'AND' | 'OR' }) =>
+  startReplay: (id: string, data: { mode: ReplayMode; speedMultiplier?: number; breakpoints?: BreakpointCondition[]; breakpointLogicalOp?: 'AND' | 'OR'; customRules?: CustomRuleSnapshot[]; startEventIndex?: number }) =>
     api.post<ReplayProgress>(`/api/v1/replay/sessions/${id}/replay/start`, data),
+  setReplaySpeed: (id: string, speedMultiplier: number) =>
+    api.post<ReplayProgress>(`/api/v1/replay/sessions/${id}/replay/speed`, { speedMultiplier }),
   singleStepNext: (id: string) => api.post<ReplayProgress>(`/api/v1/replay/sessions/${id}/replay/step`),
   pauseReplay: (id: string) => api.post<ReplayProgress>(`/api/v1/replay/sessions/${id}/replay/pause`),
   resumeReplay: (id: string) => api.post<ReplayProgress>(`/api/v1/replay/sessions/${id}/replay/resume`),
@@ -373,6 +421,20 @@ export const replayApi = {
   setBreakpoints: (id: string, data: { conditions: BreakpointCondition[]; logicalOp?: 'AND' | 'OR' }) =>
     api.post(`/api/v1/replay/sessions/${id}/replay/breakpoints`, data),
   getComparisonReport: (id: string) => api.get<ComparisonReport>(`/api/v1/replay/sessions/${id}/comparison`),
+  getHotSwapComparison: (id: string) => api.get<HotSwapDiffReport>(`/api/v1/replay/sessions/${id}/comparison/hot-swap`),
+  exportReportJson: (id: string) =>
+    api.get(`/api/v1/replay/sessions/${id}/export/json`, { responseType: 'blob' }),
+  exportReportCsv: (id: string) =>
+    api.get(`/api/v1/replay/sessions/${id}/export/csv`, { responseType: 'blob' }),
+  listBookmarks: (id: string) => api.get<ReplayBookmark[]>(`/api/v1/replay/sessions/${id}/bookmarks`),
+  createBookmark: (id: string, data: { name: string; eventIndex: number; progressSnapshot: any }) =>
+    api.post<ReplayBookmark>(`/api/v1/replay/sessions/${id}/bookmarks`, data),
+  updateBookmark: (id: string, bookmarkId: string, data: { name?: string }) =>
+    api.put<ReplayBookmark>(`/api/v1/replay/sessions/${id}/bookmarks/${bookmarkId}`, data),
+  deleteBookmark: (id: string, bookmarkId: string) =>
+    api.delete(`/api/v1/replay/sessions/${id}/bookmarks/${bookmarkId}`),
+  getBookmark: (id: string, bookmarkId: string) =>
+    api.get<ReplayBookmark>(`/api/v1/replay/sessions/${id}/bookmarks/${bookmarkId}`),
 };
 
 export const tenantsApi = {
