@@ -52,83 +52,6 @@ export class AlertsController {
     });
   }
 
-  @Get(':id')
-  @ApiOperation({ summary: 'Get alert by ID' })
-  async findOne(
-    @CurrentUser() ctx: TenantContext,
-    @Param('id') id: string,
-  ): Promise<Alert> {
-    return this.alertsService.findOne(ctx.tenantId, id);
-  }
-
-  @Get(':id/history')
-  @ApiOperation({ summary: 'Get alert history' })
-  async getHistory(
-    @CurrentUser() ctx: TenantContext,
-    @Param('id') id: string,
-  ): Promise<AlertHistory[]> {
-    return this.alertsService.getAlertHistory(ctx.tenantId, id);
-  }
-
-  @Post(':id/status')
-  @ApiOperation({ summary: 'Update alert status' })
-  async updateStatus(
-    @CurrentUser() ctx: TenantContext,
-    @Param('id') id: string,
-    @Body() dto: UpdateAlertStatusDto,
-  ): Promise<Alert> {
-    return this.alertsService.updateAlertStatus(ctx.tenantId, id, dto, ctx.userId || null);
-  }
-
-  @Post(':id/acknowledge')
-  @ApiOperation({ summary: 'Acknowledge alert' })
-  async acknowledge(
-    @CurrentUser() ctx: TenantContext,
-    @Param('id') id: string,
-    @Body() body?: { remark?: string },
-  ): Promise<Alert> {
-    return this.alertsService.updateAlertStatus(
-      ctx.tenantId, 
-      id, 
-      { status: AlertStatus.ACKNOWLEDGED, remark: body?.remark },
-      ctx.userId || null
-    );
-  }
-
-  @Post(':id/process')
-  @ApiOperation({ summary: 'Start processing alert' })
-  async process(
-    @CurrentUser() ctx: TenantContext,
-    @Param('id') id: string,
-    @Body() body?: { remark?: string },
-  ): Promise<Alert> {
-    return this.alertsService.updateAlertStatus(
-      ctx.tenantId, 
-      id, 
-      { status: AlertStatus.PROCESSING, remark: body?.remark },
-      ctx.userId || null
-    );
-  }
-
-  @Post(':id/resolve')
-  @ApiOperation({ summary: 'Resolve alert' })
-  async resolve(
-    @CurrentUser() ctx: TenantContext,
-    @Param('id') id: string,
-    @Body() body?: { remark?: string; resolvedReason?: string },
-  ): Promise<Alert> {
-    return this.alertsService.updateAlertStatus(
-      ctx.tenantId, 
-      id, 
-      { 
-        status: AlertStatus.RESOLVED, 
-        remark: body?.remark,
-        resolvedReason: body?.resolvedReason 
-      },
-      ctx.userId || null
-    );
-  }
-
   @Post('batch/acknowledge')
   @ApiOperation({ summary: 'Batch acknowledge alerts (pending only)' })
   async batchAcknowledge(
@@ -211,5 +134,82 @@ export class AlertsController {
     @Param('id') id: string,
   ): Promise<InhibitRule> {
     return this.alertsService.toggleInhibitRule(ctx.tenantId, id, false);
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Get alert by ID' })
+  async findOne(
+    @CurrentUser() ctx: TenantContext,
+    @Param('id') id: string,
+  ): Promise<Alert> {
+    return this.alertsService.findOne(ctx.tenantId, id);
+  }
+
+  @Get(':id/history')
+  @ApiOperation({ summary: 'Get alert history' })
+  async getHistory(
+    @CurrentUser() ctx: TenantContext,
+    @Param('id') id: string,
+  ): Promise<AlertHistory[]> {
+    return this.alertsService.getAlertHistory(ctx.tenantId, id);
+  }
+
+  @Post(':id/status')
+  @ApiOperation({ summary: 'Update alert status' })
+  async updateStatus(
+    @CurrentUser() ctx: TenantContext,
+    @Param('id') id: string,
+    @Body() dto: UpdateAlertStatusDto,
+  ): Promise<Alert> {
+    return this.alertsService.updateAlertStatus(ctx.tenantId, id, dto, ctx.userId || null);
+  }
+
+  @Post(':id/acknowledge')
+  @ApiOperation({ summary: 'Acknowledge alert' })
+  async acknowledge(
+    @CurrentUser() ctx: TenantContext,
+    @Param('id') id: string,
+    @Body() body?: { remark?: string },
+  ): Promise<Alert> {
+    return this.alertsService.updateAlertStatus(
+      ctx.tenantId, 
+      id, 
+      { status: AlertStatus.ACKNOWLEDGED, remark: body?.remark },
+      ctx.userId || null
+    );
+  }
+
+  @Post(':id/process')
+  @ApiOperation({ summary: 'Start processing alert' })
+  async process(
+    @CurrentUser() ctx: TenantContext,
+    @Param('id') id: string,
+    @Body() body?: { remark?: string },
+  ): Promise<Alert> {
+    return this.alertsService.updateAlertStatus(
+      ctx.tenantId, 
+      id, 
+      { status: AlertStatus.PROCESSING, remark: body?.remark },
+      ctx.userId || null
+    );
+  }
+
+  @Post(':id/resolve')
+  @ApiOperation({ summary: 'Resolve alert' })
+  async resolve(
+    @CurrentUser() ctx: TenantContext,
+    @Param('id') id: string,
+    @Body() body?: { remark?: string; resolvedReason?: string },
+  ): Promise<Alert> {
+    return this.alertsService.updateAlertStatus(
+      ctx.tenantId, 
+      id, 
+      { 
+        status: AlertStatus.RESOLVED, 
+        remark: body?.remark,
+        resolvedReason: body?.resolvedReason 
+      },
+      ctx.userId || null
+    );
   }
 }
