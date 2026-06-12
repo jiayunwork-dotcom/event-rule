@@ -690,6 +690,7 @@ const progress = ref<ReplayProgress | null>(null);
 const currentSpeed = ref(1);
 const formattedSpeed = computed(() => currentSpeed.value.toFixed(1) + 'x');
 const showBreakpointTriggered = ref(false);
+const isReplayFinished = ref(false);
 const comparisonReport = ref<ComparisonReport | null>(null);
 const hotSwapReport = ref<HotSwapDiffReport | null>(null);
 const activeDiffTab = ref('missed');
@@ -955,6 +956,7 @@ async function handleStartReplay() {
     replayMode.value = replayForm.value.mode;
     progress.value = data;
     currentSpeed.value = data.speedMultiplier || 1;
+    isReplayFinished.value = false;
     selectedSession.value = replayTargetSession.value;
     showReplayDialogFlag.value = false;
     comparisonReport.value = null;
@@ -1015,14 +1017,20 @@ function startProgressStream(sessionId: string) {
       try {
         const parsed = typeof e.data === 'string' ? JSON.parse(e.data) : e.data;
         if (parsed.type === 'progress') {
-          progress.value = parsed.data;
+          if (!isReplayFinished.value) {
+            progress.value = parsed.data;
+          }
         } else if (parsed.type === 'paused') {
-          progress.value = parsed.data;
+          if (!isReplayFinished.value) {
+            progress.value = parsed.data;
+          }
           if (parsed.data.pauseReason === 'breakpoint') {
             showBreakpointTriggered.value = true;
           }
         } else if (parsed.type === 'finished') {
-          handleReplayFinished();
+          if (!isReplayFinished.value) {
+            handleReplayFinished();
+          }
         }
       } catch {}
     };
@@ -1040,7 +1048,7 @@ function startPolling(sessionId: string) {
     try {
       const { data } = await replayApi.getProgress(sessionId);
       progress.value = data;
-      if (data.replayedCount >= data.totalEvents && data.totalEvents > 0) {
+      if (!isReplayFinished.value && data.replayedCount >= data.totalEvents && data.totalEvents > 0) {
         handleReplayFinished();
       }
     } catch {}
@@ -1064,6 +1072,7 @@ function cleanupReplay() {
   progress.value = null;
   showBreakpointTriggered.value = false;
   bookmarks.value = [];
+  isReplayFinished.value = false;
 }
 
 async function handleSingleStep() {
@@ -1071,7 +1080,7 @@ async function handleSingleStep() {
   try {
     const { data } = await replayApi.singleStepNext(currentReplaySessionId.value);
     progress.value = data;
-    if (data.replayedCount >= data.totalEvents) {
+    if (!isReplayFinished.value && data.replayedCount >= data.totalEvents) {
       handleReplayFinished();
     }
   } catch (err: any) {
@@ -1106,7 +1115,9 @@ async function handleSpeedChange(val: number) {
   if (!currentReplaySessionId.value) return;
   try {
     const { data } = await replayApi.setReplaySpeed(currentReplaySessionId.value, val);
-    progress.value = data;
+    if (progress.value) {
+      progress.value = { ...progress.value, speedMultiplier: val, replayedCount: data.replayedCount, matchedCount: data.matchedCount, hitRate: data.hitRate };
+    }
   } catch (err: any) {
     ElMessage.error(err?.response?.data?.message || '调节速度失败');
   }
@@ -1130,6 +1141,7 @@ async function handleStopReplay() {
 }
 
 async function handleReplayFinished() {
+  isReplayFinished.value = true;
   cleanupStream();
   ElMessage.success('回放完成!');
   if (currentReplaySessionId.value) {
@@ -1255,7 +1267,7 @@ async function handleJumpToBookmark(bookmark: ReplayBookmark) {
       '确认跳转',
       { type: 'warning' },
     );
-    await cleanupStream();
+    cleanupStream();
     const validBreakpoints = replayForm.value.breakpoints.filter((c) => c.field && c.value !== '');
     const customRulesToSend = ruleVersionMode.value === 'custom' ? customRules.value : undefined;
 
@@ -1268,10 +1280,13 @@ async function handleJumpToBookmark(bookmark: ReplayBookmark) {
       startEventIndex: bookmark.eventIndex,
     });
     progress.value = data;
+    currentSpeed.value = data.speedMultiplier || currentSpeed.value;
+    isReplayFinished.value = false;
     startProgressStream(currentReplaySessionId.value);
     ElMessage.success('已跳转到书签位置');
   } catch (err: any) {
     if (err !== 'cancel') {
+      console.error('书签跳转失败:', err);
       ElMessage.error(err?.response?.data?.message || '跳转失败');
     }
   }

@@ -39,7 +39,18 @@
                       <el-table-column prop="ruleId" label="规则ID" width="200" />
                       <el-table-column label="条件详情">
                         <template #default="{ row: detail }">
-                          <div v-if="detail.matchDetail" class="detail-json">
+                          <div v-if="detail.matchDetail?.conditions?.length" class="cond-list">
+                            <div
+                              v-for="(c, idx) in detail.matchDetail.conditions"
+                              :key="idx"
+                              class="cond-item"
+                              :class="c.passed ? 'passed' : 'failed'"
+                            >
+                              <el-icon><component :is="c.passed ? 'CircleCheck' : 'CircleClose'" /></el-icon>
+                              <span>{{ c.condition }} - {{ c.reason }}</span>
+                            </div>
+                          </div>
+                          <div v-else-if="detail.matchDetail" class="detail-json">
                             <pre>{{ formatJson(detail.matchDetail) }}</pre>
                           </div>
                           <span v-else class="no-detail">无详情</span>
@@ -74,7 +85,18 @@
                       <el-table-column prop="ruleId" label="规则ID" width="200" />
                       <el-table-column label="条件详情">
                         <template #default="{ row: detail }">
-                          <div v-if="detail.matchDetail" class="detail-json">
+                          <div v-if="detail.matchDetail?.conditions?.length" class="cond-list">
+                            <div
+                              v-for="(c, idx) in detail.matchDetail.conditions"
+                              :key="idx"
+                              class="cond-item"
+                              :class="c.passed ? 'passed' : 'failed'"
+                            >
+                              <el-icon><component :is="c.passed ? 'CircleCheck' : 'CircleClose'" /></el-icon>
+                              <span>{{ c.condition }} - {{ c.reason }}</span>
+                            </div>
+                          </div>
+                          <div v-else-if="detail.matchDetail" class="detail-json">
                             <pre>{{ formatJson(detail.matchDetail) }}</pre>
                           </div>
                           <span v-else class="no-detail">无详情</span>
@@ -155,7 +177,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import { Clock, Setting } from '@element-plus/icons-vue';
+import { Clock, Setting, CircleCheck, CircleClose } from '@element-plus/icons-vue';
 import type { HotSwapDiffItem } from '@/services/apiEndpoints';
 
 const props = defineProps<{
@@ -270,6 +292,31 @@ function formatJson(obj: any) {
   font-size: 12px;
   color: #606266;
   margin-bottom: 8px;
+}
+
+.cond-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cond-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 4px 6px;
+  border-radius: 3px;
+}
+
+.cond-item.passed {
+  color: #67c23a;
+  background: #f0f9eb;
+}
+
+.cond-item.failed {
+  color: #f56c6c;
+  background: #fef0f0;
 }
 
 .detail-json {

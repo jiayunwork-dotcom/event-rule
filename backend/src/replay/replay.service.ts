@@ -350,6 +350,14 @@ export class ReplayService {
       throw new BadRequestException('只能回放已停止的录制会话');
     }
 
+    const existingState = this.activeReplays.get(sessionId);
+    if (existingState) {
+      if (existingState.timer) {
+        clearTimeout(existingState.timer);
+      }
+      this.activeReplays.delete(sessionId);
+    }
+
     const events = await this.eventRepository.find({
       where: { sessionId, tenantId },
       order: { recordedAt: 'ASC' },
