@@ -193,7 +193,7 @@
       </div>
 
       <div v-else class="empty-state">
-        <el-empty description="请从上方选择一个已停止的录制会话，然后点击\"启动回放\"开始调试">
+        <el-empty description="请从上方选择一个已停止的录制会话，然后点击启动回放开始调试">
           <el-button type="primary" :icon="VideoPlay" :disabled="!selectedSession || selectedSession.status !== 'stopped'" @click="selectedSession && showReplayDialog(selectedSession)">
             启动回放
           </el-button>
