@@ -33,6 +33,7 @@ export class DatabaseInitService implements OnModuleInit {
       try {
         this.logger.log(`Initializing database (attempt ${attempt}/${maxRetries})...`);
         await this.ensureReplayTables();
+        await this.ensureVersionTables();
         await this.ensureDefaultTenant();
         await this.ensureDefaultUser();
         await this.ensureSystemTemplates();
@@ -57,6 +58,41 @@ export class DatabaseInitService implements OnModuleInit {
 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private async ensureVersionTables() {
+    this.logger.log('Ensuring rule version tables exist...');
+
+    await this.dataSource.query(`
+      CREATE TABLE IF NOT EXISTS rule_versions (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        rule_id UUID NOT NULL REFERENCES rules(id) ON DELETE CASCADE,
+        version_number INT NOT NULL,
+        snapshot JSONB NOT NULL,
+        change_summary TEXT,
+        created_by VARCHAR(100),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT uq_rule_version UNIQUE (rule_id, version_number)
+      );
+    `);
+
+    await this.dataSource.query(`
+      CREATE INDEX IF NOT EXISTS idx_rule_versions_rule_id ON rule_versions(rule_id);
+    `);
+
+    await this.dataSource.query(`
+      CREATE INDEX IF NOT EXISTS idx_rule_versions_created_at ON rule_versions(rule_id, created_at DESC);
+    `);
+
+    await this.dataSource.query(`
+      CREATE TABLE IF NOT EXISTS rule_locks (
+        rule_id UUID PRIMARY KEY REFERENCES rules(id) ON DELETE CASCADE,
+        locked_by VARCHAR(100) NOT NULL,
+        locked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    this.logger.log('Rule version tables ensured');
   }
 
   private async ensureReplayTables() {
