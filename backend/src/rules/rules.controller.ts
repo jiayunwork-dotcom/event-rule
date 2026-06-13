@@ -29,11 +29,13 @@ export class RulesController {
     @Query('startTime') startTime?: string,
     @Query('endTime') endTime?: string,
     @Query('createdBy') createdBy?: string,
+    @Query('tag') tag?: string,
   ) {
     return this.versionsService.getVersions(ruleId, {
       startTime,
       endTime,
       createdBy,
+      tag,
     });
   }
 
@@ -44,6 +46,15 @@ export class RulesController {
     @Param('ruleId') ruleId: string,
   ) {
     return this.versionsService.getVersionCreators(ruleId);
+  }
+
+  @Get(':ruleId/versions/tags')
+  @ApiOperation({ summary: 'Get all distinct tags for a rule' })
+  async getVersionTags(
+    @CurrentTenant() tenantId: string,
+    @Param('ruleId') ruleId: string,
+  ) {
+    return this.versionsService.getVersionTags(ruleId);
   }
 
   @Get(':ruleId/versions/:versionId')
@@ -125,20 +136,100 @@ export class RulesController {
     );
   }
 
+  @Post(':ruleId/versions/:versionId/rollback-preview')
+  @ApiOperation({ summary: 'Preview rollback to a specific version' })
+  async rollbackPreview(
+    @CurrentTenant() tenantId: string,
+    @Param('ruleId') ruleId: string,
+    @Param('versionId') versionId: string,
+  ) {
+    return this.versionsService.getRollbackPreview(tenantId, ruleId, versionId);
+  }
+
   @Post(':ruleId/versions/:versionId/rollback')
   @ApiOperation({ summary: 'Rollback rule to a specific version' })
   async rollback(
     @CurrentTenant() tenantId: string,
     @Param('ruleId') ruleId: string,
     @Param('versionId') versionId: string,
-    @Body() body: { rolledBackBy: string },
+    @Body() body: { rolledBackBy: string; reason?: string },
   ) {
     return this.versionsService.rollback(
       tenantId,
       ruleId,
       versionId,
       body.rolledBackBy || 'system',
+      body.reason,
     );
+  }
+
+  @Post(':ruleId/versions/:versionId/tags')
+  @ApiOperation({ summary: 'Add tags to a version' })
+  async addTags(
+    @CurrentTenant() tenantId: string,
+    @Param('ruleId') ruleId: string,
+    @Param('versionId') versionId: string,
+    @Body() body: { tags: string[] },
+  ) {
+    return this.versionsService.addTags(ruleId, versionId, body.tags);
+  }
+
+  @Delete(':ruleId/versions/:versionId/tags/:tag')
+  @ApiOperation({ summary: 'Remove a tag from a version' })
+  async removeTag(
+    @CurrentTenant() tenantId: string,
+    @Param('ruleId') ruleId: string,
+    @Param('versionId') versionId: string,
+    @Param('tag') tag: string,
+  ) {
+    return this.versionsService.removeTag(ruleId, versionId, decodeURIComponent(tag));
+  }
+
+  @Post(':ruleId/versions/:versionId/favorite')
+  @ApiOperation({ summary: 'Toggle favorite status of a version' })
+  async toggleFavorite(
+    @CurrentTenant() tenantId: string,
+    @Param('ruleId') ruleId: string,
+    @Param('versionId') versionId: string,
+  ) {
+    return this.versionsService.toggleFavorite(ruleId, versionId);
+  }
+
+  @Post(':ruleId/versions/batch-delete')
+  @ApiOperation({ summary: 'Batch delete versions (skips favorites)' })
+  async batchDeleteVersions(
+    @CurrentTenant() tenantId: string,
+    @Param('ruleId') ruleId: string,
+    @Body() body: { versionIds: string[] },
+  ) {
+    return this.versionsService.batchDeleteVersions(ruleId, body.versionIds);
+  }
+
+  @Post(':ruleId/versions/batch-export')
+  @ApiOperation({ summary: 'Batch export versions as JSON' })
+  async batchExportVersions(
+    @CurrentTenant() tenantId: string,
+    @Param('ruleId') ruleId: string,
+    @Body() body: { versionIds: string[] },
+    @Res() res: Response,
+  ) {
+    const data = await this.versionsService.batchExportVersions(ruleId, body.versionIds);
+    const timestamp = new Date().toISOString().slice(0, 10);
+    const filename = `${data.ruleName}_versions_${timestamp}.json`;
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(JSON.stringify(data, null, 2));
+  }
+
+  @Post(':ruleId/versions/batch-tag')
+  @ApiOperation({ summary: 'Batch add tags to versions' })
+  async batchAddTags(
+    @CurrentTenant() tenantId: string,
+    @Param('ruleId') ruleId: string,
+    @Body() body: { versionIds: string[]; tags: string[] },
+  ) {
+    return this.versionsService.batchAddTags(ruleId, body.versionIds, body.tags);
   }
 
   @Put(':id')

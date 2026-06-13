@@ -454,7 +454,7 @@ export class RulesService implements OnModuleInit {
     await this.refreshRulesCache(tenantId);
 
     try {
-      await this.versionsService.createVersion(saved.id, saved, '创建规则', 'system');
+      await this.versionsService.createVersion(saved.id, saved, [{ field: 'create', label: '创建', displayText: '创建规则' }], 'system');
     } catch (error) {
       this.logger.error(`Failed to create version for rule ${saved.id}`, error);
     }
@@ -493,39 +493,138 @@ export class RulesService implements OnModuleInit {
     return saved;
   }
 
-  private generateChangeSummary(oldRule: Rule, dto: Partial<CreateRuleDto>): string {
-    const changes: string[] = [];
+  private generateChangeSummary(oldRule: Rule, dto: Partial<CreateRuleDto>): any[] {
+    const items: any[] = [];
     if (dto.name !== undefined && dto.name !== oldRule.name) {
-      changes.push(`名称从"${oldRule.name}"改为"${dto.name}"`);
+      items.push({ field: 'name', label: '名称', oldValue: oldRule.name, newValue: dto.name, displayText: `名称从"${oldRule.name}"改为"${dto.name}"` });
     }
     if (dto.severity !== undefined && dto.severity !== oldRule.severity) {
-      changes.push(`严重程度从${oldRule.severity}改为${dto.severity}`);
+      items.push({ field: 'severity', label: '严重程度', oldValue: oldRule.severity, newValue: dto.severity, displayText: `严重程度从${oldRule.severity}改为${dto.severity}` });
     }
     if (dto.priority !== undefined && dto.priority !== oldRule.priority) {
-      changes.push(`优先级从${oldRule.priority}改为${dto.priority}`);
+      items.push({ field: 'priority', label: '优先级', oldValue: oldRule.priority, newValue: dto.priority, displayText: `优先级从${oldRule.priority}改为${dto.priority}` });
     }
     if (dto.isEnabled !== undefined && dto.isEnabled !== oldRule.isEnabled) {
-      changes.push(dto.isEnabled ? '启用规则' : '禁用规则');
+      items.push({
+        field: 'isEnabled',
+        label: '启用状态',
+        oldValue: oldRule.isEnabled,
+        newValue: dto.isEnabled,
+        displayText: dto.isEnabled ? '⚠️规则已启用' : '⚠️规则已禁用',
+        isStatusChange: true,
+        statusChangeType: dto.isEnabled ? 'enabled' : 'disabled',
+      });
     }
     if (dto.conditionType !== undefined && dto.conditionType !== oldRule.conditionType) {
-      changes.push(`条件类型从${oldRule.conditionType}改为${dto.conditionType}`);
+      items.push({ field: 'conditionType', label: '条件类型', oldValue: oldRule.conditionType, newValue: dto.conditionType, displayText: `条件类型从${oldRule.conditionType}改为${dto.conditionType}` });
     }
     if (dto.conditions !== undefined && JSON.stringify(dto.conditions) !== JSON.stringify(oldRule.conditions)) {
-      changes.push('修改了条件配置');
+      const oldConds = oldRule.conditions as RuleCondition;
+      const newConds = dto.conditions as RuleCondition;
+      const condItems = this.generateConditionChangeItems(oldConds, newConds);
+      if (condItems.length > 0) {
+        items.push(...condItems);
+      } else {
+        items.push({ field: 'conditions', label: '条件配置', displayText: '修改了条件配置' });
+      }
     }
     if (dto.dsl !== undefined && dto.dsl !== oldRule.dsl) {
-      changes.push('修改了DSL规则');
+      items.push({ field: 'dsl', label: 'DSL规则', oldValue: oldRule.dsl, newValue: dto.dsl, displayText: '修改了DSL规则' });
     }
     if (dto.windowSize !== undefined && dto.windowSize !== oldRule.windowSize) {
-      changes.push(`窗口大小从${oldRule.windowSize}改为${dto.windowSize}`);
+      items.push({ field: 'windowSize', label: '窗口大小', oldValue: oldRule.windowSize, newValue: dto.windowSize, displayText: `窗口大小从${oldRule.windowSize}改为${dto.windowSize}` });
     }
     if (dto.description !== undefined && dto.description !== oldRule.description) {
-      changes.push('修改了描述');
+      items.push({ field: 'description', label: '描述', oldValue: oldRule.description, newValue: dto.description, displayText: '修改了描述' });
     }
-    if (changes.length === 0) {
-      changes.push('更新规则');
+    if (items.length === 0) {
+      items.push({ field: 'general', label: '更新', displayText: '更新规则' });
     }
-    return changes.join('，');
+    return items;
+  }
+
+  private generateConditionChangeItems(oldConds: RuleCondition, newConds: RuleCondition): any[] {
+    const items: any[] = [];
+    if (!oldConds || !newConds) return items;
+
+    if (oldConds.operator !== newConds.operator) {
+      items.push({ field: 'conditions.operator', label: '条件逻辑运算符', oldValue: oldConds.operator, newValue: newConds.operator, displayText: `条件逻辑从${oldConds.operator}改为${newConds.operator}` });
+    }
+
+    const oldList = oldConds.conditions || [];
+    const newList = newConds.conditions || [];
+    const maxLen = Math.max(oldList.length, newList.length);
+
+    for (let i = 0; i < maxLen; i++) {
+      const oldC = oldList[i];
+      const newC = newList[i];
+
+      if (!oldC && newC) {
+        items.push({ field: `conditions[${i}]`, label: `新增条件${i + 1}`, newValue: newC, displayText: `新增条件: ${this.describeCondition(newC)}` });
+      } else if (oldC && !newC) {
+        items.push({ field: `conditions[${i}]`, label: `删除条件${i + 1}`, oldValue: oldC, displayText: `删除条件: ${this.describeCondition(oldC)}` });
+      } else if (oldC && newC && JSON.stringify(oldC) !== JSON.stringify(newC)) {
+        const changeDetails = this.describeConditionChanges(oldC, newC, i);
+        items.push(...changeDetails);
+      }
+    }
+
+    return items;
+  }
+
+  private describeCondition(cond: any): string {
+    if (!cond) return '';
+    switch (cond.type) {
+      case 'threshold':
+        return `${cond.metric || ''} ${cond.operator || ''} ${cond.value ?? ''}`;
+      case 'label':
+        return `${cond.label || ''} ${cond.operator || ''} ${cond.labelValue || ''}`;
+      case 'window':
+        return `窗口聚合: ${cond.metric || ''} ${cond.aggregate || ''} ${cond.operator || ''} ${cond.threshold ?? ''}`;
+      case 'frequency':
+        return `频率: ${cond.metric || ''} ${cond.windowSize || ''}s内超${cond.threshold ?? ''}次`;
+      case 'sequence':
+        return `序列: ${cond.eventA || ''} -> ${cond.eventB || ''} (${cond.interval || ''}s)`;
+      default:
+        return JSON.stringify(cond);
+    }
+  }
+
+  private describeConditionChanges(oldC: any, newC: any, index: number): any[] {
+    const items: any[] = [];
+    const keys = new Set([...Object.keys(oldC), ...Object.keys(newC)]);
+    const condLabel = `条件${index + 1}`;
+
+    for (const key of keys) {
+      const oldVal = oldC[key];
+      const newVal = newC[key];
+      if (JSON.stringify(oldVal) !== JSON.stringify(newVal)) {
+        const keyLabelMap: Record<string, string> = {
+          type: '类型', metric: '指标', operator: '操作符', value: '阈值',
+          label: '标签', labelValue: '标签值', aggregate: '聚合函数',
+          threshold: '阈值', windowSize: '窗口大小',
+          eventA: '前置事件', eventB: '后续事件', interval: '时间间隔',
+        };
+        const keyLabel = keyLabelMap[key] || key;
+        let displayText = `${condLabel}.${keyLabel}从${oldVal ?? '无'}改为${newVal ?? '无'}`;
+
+        if (key === 'threshold' || key === 'value') {
+          displayText = `${condLabel}阈值从${oldVal ?? '无'}改为${newVal ?? '无'}`;
+        } else if (key === 'metric') {
+          displayText = `${condLabel}指标从${oldVal ?? '无'}改为${newVal ?? '无'}`;
+        }
+
+        items.push({
+          field: `conditions[${index}].${key}`,
+          label: `${condLabel}.${keyLabel}`,
+          oldValue: oldVal,
+          newValue: newVal,
+          displayText,
+        });
+      }
+    }
+
+    return items;
   }
 
   async remove(tenantId: string, id: string): Promise<void> {
@@ -563,7 +662,15 @@ export class RulesService implements OnModuleInit {
       await this.versionsService.createVersion(
         saved.id,
         saved,
-        isEnabled ? '启用规则' : '禁用规则',
+        [{
+          field: 'isEnabled',
+          label: '启用状态',
+          oldValue: !isEnabled,
+          newValue: isEnabled,
+          displayText: isEnabled ? '⚠️规则已启用' : '⚠️规则已禁用',
+          isStatusChange: true,
+          statusChangeType: isEnabled ? 'enabled' : 'disabled',
+        }],
         'system',
       );
     } catch (error) {

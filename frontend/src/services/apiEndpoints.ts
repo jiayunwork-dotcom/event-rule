@@ -164,9 +164,44 @@ export interface RuleVersion {
   ruleId: string;
   versionNumber: number;
   snapshot: any;
-  changeSummary: string;
+  changeSummary: ChangeSummaryItem[] | string;
   createdBy: string;
   createdAt: string;
+  tags: string[];
+  isFavorite: boolean;
+}
+
+export interface ChangeSummaryItem {
+  field: string;
+  label: string;
+  oldValue?: any;
+  newValue?: any;
+  displayText: string;
+  isStatusChange?: boolean;
+  statusChangeType?: 'enabled' | 'disabled';
+}
+
+export interface ConditionTreeNode {
+  id: string;
+  type: 'operator' | 'condition';
+  operator?: 'AND' | 'OR';
+  condition?: any;
+  children?: ConditionTreeNode[];
+  diffType?: 'added' | 'removed' | 'modified' | 'unchanged';
+  oldCondition?: any;
+  newCondition?: any;
+}
+
+export interface ConditionTreeMapping {
+  leftId: string;
+  rightId: string;
+  type: 'unchanged' | 'modified' | 'structural_change';
+}
+
+export interface ConditionTreeDiffResult {
+  leftTree: ConditionTreeNode;
+  rightTree: ConditionTreeNode;
+  mappings: ConditionTreeMapping[];
 }
 
 export interface DiffField {
@@ -189,6 +224,23 @@ export interface VersionDiffResult {
   versionA: RuleVersion;
   versionB: RuleVersion;
   diff: DiffResult;
+  conditionTreeDiff: ConditionTreeDiffResult;
+}
+
+export interface RollbackPreviewResult {
+  currentRule: Rule;
+  targetVersion: RuleVersion;
+  diff: DiffResult;
+  conditionTreeDiff: ConditionTreeDiffResult;
+}
+
+export interface BatchDeleteResult {
+  deleted: number;
+  skipped: number;
+}
+
+export interface BatchTagResult {
+  updated: number;
 }
 
 export interface BatchRollbackResult {
@@ -201,16 +253,32 @@ export interface LockCheckResult {
 }
 
 export const versionsApi = {
-  getVersions: (ruleId: string, params?: { startTime?: string; endTime?: string; createdBy?: string }) =>
+  getVersions: (ruleId: string, params?: { startTime?: string; endTime?: string; createdBy?: string; tag?: string }) =>
     api.get<RuleVersion[]>(`/api/v1/rules/${ruleId}/versions`, { params }),
   getVersion: (ruleId: string, versionId: string) =>
     api.get<RuleVersion>(`/api/v1/rules/${ruleId}/versions/${versionId}`),
   getVersionCreators: (ruleId: string) =>
     api.get<string[]>(`/api/v1/rules/${ruleId}/versions/creators`),
+  getVersionTags: (ruleId: string) =>
+    api.get<string[]>(`/api/v1/rules/${ruleId}/versions/tags`),
   diffVersions: (ruleId: string, versionIdA: string, versionIdB: string) =>
     api.post<VersionDiffResult>(`/api/v1/rules/${ruleId}/versions/diff`, { versionIdA, versionIdB }),
-  rollback: (ruleId: string, versionId: string, rolledBackBy: string) =>
-    api.post<Rule>(`/api/v1/rules/${ruleId}/versions/${versionId}/rollback`, { rolledBackBy }),
+  rollback: (ruleId: string, versionId: string, rolledBackBy: string, reason?: string) =>
+    api.post<Rule>(`/api/v1/rules/${ruleId}/versions/${versionId}/rollback`, { rolledBackBy, reason }),
+  rollbackPreview: (ruleId: string, versionId: string) =>
+    api.post<RollbackPreviewResult>(`/api/v1/rules/${ruleId}/versions/${versionId}/rollback-preview`),
+  addTags: (ruleId: string, versionId: string, tags: string[]) =>
+    api.post<RuleVersion>(`/api/v1/rules/${ruleId}/versions/${versionId}/tags`, { tags }),
+  removeTag: (ruleId: string, versionId: string, tag: string) =>
+    api.delete<RuleVersion>(`/api/v1/rules/${ruleId}/versions/${versionId}/tags/${encodeURIComponent(tag)}`),
+  toggleFavorite: (ruleId: string, versionId: string) =>
+    api.post<RuleVersion>(`/api/v1/rules/${ruleId}/versions/${versionId}/favorite`),
+  batchDelete: (ruleId: string, versionIds: string[]) =>
+    api.post<BatchDeleteResult>(`/api/v1/rules/${ruleId}/versions/batch-delete`, { versionIds }),
+  batchExport: (ruleId: string, versionIds: string[]) =>
+    api.post(`/api/v1/rules/${ruleId}/versions/batch-export`, { versionIds }, { responseType: 'blob' }),
+  batchAddTags: (ruleId: string, versionIds: string[], tags: string[]) =>
+    api.post<BatchTagResult>(`/api/v1/rules/${ruleId}/versions/batch-tag`, { versionIds, tags }),
   batchRollback: (ruleIds: string[], rolledBackBy: string) =>
     api.post<BatchRollbackResult>('/api/v1/rule-versions/batch-rollback', { ruleIds, rolledBackBy }),
   checkLocks: (ruleIds: string[]) =>

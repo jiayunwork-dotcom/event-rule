@@ -1,7 +1,7 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, LessThan } from 'typeorm';
-import { RuleVersion, RuleLock } from './rule-version.entity';
+import { Repository, DataSource, LessThan, In } from 'typeorm';
+import { RuleVersion, RuleLock, ConditionTreeNode, ConditionTreeDiffResult } from './rule-version.entity';
 import { Rule } from './rule.entity';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
@@ -25,7 +25,7 @@ export class RuleVersionsService {
   async createVersion(
     ruleId: string,
     rule: Rule,
-    changeSummary: string,
+    changeSummary: any,
     createdBy: string,
   ): Promise<RuleVersion> {
     const lastVersion = await this.versionRepository.findOne({
@@ -54,6 +54,8 @@ export class RuleVersionsService {
       snapshot,
       changeSummary,
       createdBy,
+      tags: [],
+      isFavorite: false,
     });
 
     const saved = await this.versionRepository.save(version);
@@ -67,17 +69,23 @@ export class RuleVersionsService {
     const count = await this.versionRepository.count({ where: { ruleId } });
     if (count <= MAX_VERSIONS) return;
 
+    const nonFavoriteCount = await this.versionRepository.count({
+      where: { ruleId, isFavorite: false },
+    });
+
+    if (nonFavoriteCount <= MAX_VERSIONS) return;
+
     const deleteCount = count - MAX_VERSIONS;
-    const oldestVersions = await this.versionRepository.find({
-      where: { ruleId },
+    const oldestNonFavoriteVersions = await this.versionRepository.find({
+      where: { ruleId, isFavorite: false },
       order: { versionNumber: 'ASC' },
       take: deleteCount,
     });
 
-    const idsToDelete = oldestVersions.map(v => v.id);
+    const idsToDelete = oldestNonFavoriteVersions.map(v => v.id);
     if (idsToDelete.length > 0) {
       await this.versionRepository.delete(idsToDelete);
-      this.logger.log(`Pruned ${idsToDelete.length} old versions for rule ${ruleId}`);
+      this.logger.log(`Pruned ${idsToDelete.length} old non-favorite versions for rule ${ruleId}`);
     }
   }
 
@@ -87,12 +95,12 @@ export class RuleVersionsService {
       startTime?: string;
       endTime?: string;
       createdBy?: string;
+      tag?: string;
     },
   ): Promise<RuleVersion[]> {
     const qb = this.versionRepository
       .createQueryBuilder('v')
-      .where('v.rule_id = :ruleId', { ruleId })
-      .orderBy('v.version_number', 'DESC');
+      .where('v.rule_id = :ruleId', { ruleId });
 
     if (options?.startTime) {
       qb.andWhere('v.created_at >= :startTime', { startTime: options.startTime });
@@ -103,6 +111,12 @@ export class RuleVersionsService {
     if (options?.createdBy) {
       qb.andWhere('v.created_by = :createdBy', { createdBy: options.createdBy });
     }
+    if (options?.tag) {
+      qb.andWhere(':tag = ANY(v.tags)', { tag: options.tag });
+    }
+
+    qb.orderBy('v.is_favorite', 'DESC');
+    qb.addOrderBy('v.version_number', 'DESC');
 
     return qb.getMany();
   }
@@ -117,6 +131,36 @@ export class RuleVersionsService {
     return version;
   }
 
+  async addTags(ruleId: string, versionId: string, tags: string[]): Promise<RuleVersion> {
+    const version = await this.getVersion(ruleId, versionId);
+    const existingTags = version.tags || [];
+    const newTags = [...new Set([...existingTags, ...tags])];
+    version.tags = newTags;
+    return this.versionRepository.save(version);
+  }
+
+  async removeTag(ruleId: string, versionId: string, tag: string): Promise<RuleVersion> {
+    const version = await this.getVersion(ruleId, versionId);
+    version.tags = (version.tags || []).filter(t => t !== tag);
+    return this.versionRepository.save(version);
+  }
+
+  async toggleFavorite(ruleId: string, versionId: string): Promise<RuleVersion> {
+    const version = await this.getVersion(ruleId, versionId);
+    version.isFavorite = !version.isFavorite;
+    return this.versionRepository.save(version);
+  }
+
+  async getVersionTags(ruleId: string): Promise<string[]> {
+    const result = await this.versionRepository
+      .createQueryBuilder('v')
+      .select('DISTINCT UNNEST(v.tags)', 'tag')
+      .where('v.rule_id = :ruleId', { ruleId })
+      .andWhere('array_length(v.tags, 1) > 0')
+      .getRawMany();
+    return result.map(r => r.tag).filter(Boolean);
+  }
+
   async diffVersions(
     ruleId: string,
     versionIdA: string,
@@ -125,6 +169,7 @@ export class RuleVersionsService {
     versionA: RuleVersion;
     versionB: RuleVersion;
     diff: DiffResult;
+    conditionTreeDiff: ConditionTreeDiffResult;
   }> {
     const versionA = await this.getVersion(ruleId, versionIdA);
     const versionB = await this.getVersion(ruleId, versionIdB);
@@ -135,8 +180,47 @@ export class RuleVersionsService {
         : [versionB, versionA];
 
     const diff = this.computeDiff(older.snapshot, newer.snapshot);
+    const conditionTreeDiff = this.computeConditionTreeDiff(older.snapshot, newer.snapshot);
 
-    return { versionA: older, versionB: newer, diff };
+    return { versionA: older, versionB: newer, diff, conditionTreeDiff };
+  }
+
+  async getRollbackPreview(
+    tenantId: string,
+    ruleId: string,
+    targetVersionId: string,
+  ): Promise<{
+    currentRule: Rule;
+    targetVersion: RuleVersion;
+    diff: DiffResult;
+    conditionTreeDiff: ConditionTreeDiffResult;
+  }> {
+    const rule = await this.ruleRepository.findOne({
+      where: { id: ruleId, tenantId },
+    });
+    if (!rule) {
+      throw new BadRequestException('Rule not found');
+    }
+
+    const targetVersion = await this.getVersion(ruleId, targetVersionId);
+
+    const currentSnapshot = {
+      name: rule.name,
+      description: rule.description,
+      severity: rule.severity,
+      conditionType: rule.conditionType,
+      conditions: rule.conditions,
+      dsl: rule.dsl,
+      priority: rule.priority,
+      isEnabled: rule.isEnabled,
+      windowSize: rule.windowSize,
+      groupByLabels: rule.groupByLabels,
+    };
+
+    const diff = this.computeDiff(targetVersion.snapshot, currentSnapshot);
+    const conditionTreeDiff = this.computeConditionTreeDiff(targetVersion.snapshot, currentSnapshot);
+
+    return { currentRule: rule, targetVersion, diff, conditionTreeDiff };
   }
 
   private computeDiff(snapshotA: any, snapshotB: any): DiffResult {
@@ -299,11 +383,181 @@ export class RuleVersionsService {
     return { added, removed };
   }
 
+  private computeConditionTreeDiff(snapshotA: any, snapshotB: any): ConditionTreeDiffResult {
+    const leftTree = this.buildConditionTree(snapshotA.conditions, 'left');
+    const rightTree = this.buildConditionTree(snapshotB.conditions, 'right');
+
+    this.markTreeDiff(leftTree, rightTree);
+
+    const mappings = this.computeTreeMappings(leftTree, rightTree);
+
+    return { leftTree, rightTree, mappings };
+  }
+
+  private buildConditionTree(conditions: any, prefix: string): ConditionTreeNode {
+    if (!conditions) {
+      return { id: `${prefix}_empty`, type: 'operator', operator: 'AND', children: [] };
+    }
+
+    const operator = conditions.operator || 'AND';
+    const condList: any[] = conditions.conditions || [];
+
+    const children: ConditionTreeNode[] = condList.map((cond: any, idx: number) => {
+      if (cond.operator && cond.conditions) {
+        return this.buildConditionTree(cond, `${prefix}_${idx}`);
+      }
+      return {
+        id: `${prefix}_cond_${idx}`,
+        type: 'condition' as const,
+        condition: cond,
+        diffType: 'unchanged' as const,
+      };
+    });
+
+    return {
+      id: `${prefix}_root`,
+      type: 'operator',
+      operator,
+      children,
+      diffType: 'unchanged',
+    };
+  }
+
+  private markTreeDiff(leftTree: ConditionTreeNode, rightTree: ConditionTreeNode): void {
+    const leftConditions = this.collectConditions(leftTree);
+    const rightConditions = this.collectConditions(rightTree);
+
+    const leftMap = new Map(leftConditions.map(c => [c.id, c]));
+    const rightMap = new Map(rightConditions.map(c => [c.id, c]));
+
+    for (const leftCond of leftConditions) {
+      const key = this.conditionKey(leftCond.condition);
+      const rightMatch = rightConditions.find(
+        rc => this.conditionKey(rc.condition) === key && !rc._matched,
+      );
+      if (rightMatch) {
+        leftCond.diffType = 'unchanged';
+        rightMatch.diffType = 'unchanged';
+        rightMatch._matched = true;
+        leftCond._matched = true;
+        if (JSON.stringify(leftCond.condition) !== JSON.stringify(rightMatch.condition)) {
+          leftCond.diffType = 'modified';
+          rightMatch.diffType = 'modified';
+          leftCond.newCondition = rightMatch.condition;
+          rightMatch.oldCondition = leftCond.condition;
+        }
+      } else {
+        leftCond.diffType = 'removed';
+      }
+    }
+
+    for (const rightCond of rightConditions) {
+      if (!rightCond._matched) {
+        rightCond.diffType = 'added';
+      }
+    }
+
+    if (leftTree.operator !== rightTree.operator) {
+      leftTree.diffType = 'modified';
+      rightTree.diffType = 'modified';
+    }
+
+    this.markOperatorNodes(leftTree);
+    this.markOperatorNodes(rightTree);
+  }
+
+  private markOperatorNodes(node: ConditionTreeNode): void {
+    if (node.type === 'operator' && node.children) {
+      for (const child of node.children) {
+        this.markOperatorNodes(child);
+      }
+      const childDiffTypes = node.children.map(c => c.diffType);
+      if (childDiffTypes.some(d => d === 'added' || 'removed' || d === 'modified')) {
+        if (node.diffType !== 'modified') {
+          node.diffType = 'unchanged';
+        }
+      }
+    }
+  }
+
+  private collectConditions(node: ConditionTreeNode): any[] {
+    const result: any[] = [];
+    if (node.type === 'condition') {
+      result.push(node);
+    }
+    if (node.children) {
+      for (const child of node.children) {
+        result.push(...this.collectConditions(child));
+      }
+    }
+    return result;
+  }
+
+  private conditionKey(cond: any): string {
+    if (!cond) return '';
+    return `${cond.type || ''}_${cond.metric || ''}_${cond.label || ''}`;
+  }
+
+  private computeTreeMappings(
+    leftTree: ConditionTreeNode,
+    rightTree: ConditionTreeNode,
+  ): Array<{ leftId: string; rightId: string; type: 'unchanged' | 'modified' | 'structural_change' }> {
+    const mappings: Array<{ leftId: string; rightId: string; type: 'unchanged' | 'modified' | 'structural_change' }> = [];
+
+    const leftConditions = this.collectConditions(leftTree);
+    const rightConditions = this.collectConditions(rightTree);
+
+    for (const left of leftConditions) {
+      for (const right of rightConditions) {
+        if (left.diffType === 'modified' && right.diffType === 'modified' &&
+            left.newCondition && right.oldCondition &&
+            JSON.stringify(left.condition) === JSON.stringify(right.oldCondition)) {
+          mappings.push({
+            leftId: left.id,
+            rightId: right.id,
+            type: 'modified',
+          });
+        } else if (left.diffType === 'removed' && right.diffType === 'added') {
+          const keyL = this.conditionKey(left.condition);
+          const keyR = this.conditionKey(right.condition);
+          if (keyL && keyR && keyL === keyR) {
+            mappings.push({
+              leftId: left.id,
+              rightId: right.id,
+              type: 'structural_change',
+            });
+          }
+        } else if (left.diffType === 'unchanged' && right.diffType === 'unchanged') {
+          if (JSON.stringify(left.condition) === JSON.stringify(right.condition)) {
+            if (!mappings.some(m => m.leftId === left.id || m.rightId === right.id)) {
+              mappings.push({
+                leftId: left.id,
+                rightId: right.id,
+                type: 'unchanged',
+              });
+            }
+          }
+        }
+      }
+    }
+
+    if (leftTree.operator !== rightTree.operator) {
+      mappings.push({
+        leftId: leftTree.id,
+        rightId: rightTree.id,
+        type: 'structural_change',
+      });
+    }
+
+    return mappings;
+  }
+
   async rollback(
     tenantId: string,
     ruleId: string,
     targetVersionId: string,
     rolledBackBy: string,
+    reason?: string,
   ): Promise<Rule> {
     const isLocked = await this.isRuleLocked(ruleId);
     if (isLocked) {
@@ -348,6 +602,10 @@ export class RuleVersionsService {
       });
       const newVersionNumber = lastVersion ? lastVersion.versionNumber + 1 : 1;
 
+      const changeSummaryText = reason
+        ? `回滚至版本${targetVersion.versionNumber}: ${reason}`
+        : `回滚至版本${targetVersion.versionNumber}`;
+
       const newVersion = queryRunner.manager.create(RuleVersion, {
         ruleId,
         versionNumber: newVersionNumber,
@@ -363,7 +621,7 @@ export class RuleVersionsService {
           windowSize: savedRule.windowSize,
           groupByLabels: savedRule.groupByLabels,
         },
-        changeSummary: `回滚至版本${targetVersion.versionNumber}`,
+        changeSummary: [{ field: 'rollback', label: '回滚操作', displayText: changeSummaryText, isStatusChange: false }],
         createdBy: rolledBackBy,
       });
 
@@ -436,6 +694,59 @@ export class RuleVersionsService {
     }
 
     return result;
+  }
+
+  async batchDeleteVersions(ruleId: string, versionIds: string[]): Promise<{ deleted: number; skipped: number }> {
+    const versions = await this.versionRepository.find({
+      where: { id: In(versionIds), ruleId },
+    });
+
+    const favoriteVersions = versions.filter(v => v.isFavorite);
+    const deletableVersions = versions.filter(v => !v.isFavorite);
+
+    if (deletableVersions.length > 0) {
+      await this.versionRepository.delete(deletableVersions.map(v => v.id));
+    }
+
+    return {
+      deleted: deletableVersions.length,
+      skipped: favoriteVersions.length,
+    };
+  }
+
+  async batchExportVersions(ruleId: string, versionIds: string[]): Promise<{ ruleName: string; versions: any[] }> {
+    const rule = await this.ruleRepository.findOne({ where: { id: ruleId } });
+    const versions = await this.versionRepository.find({
+      where: { id: In(versionIds), ruleId },
+      order: { versionNumber: 'ASC' },
+    });
+
+    return {
+      ruleName: rule?.name || 'unknown',
+      versions: versions.map(v => ({
+        versionNumber: v.versionNumber,
+        snapshot: v.snapshot,
+        changeSummary: v.changeSummary,
+        createdBy: v.createdBy,
+        tags: v.tags,
+        isFavorite: v.isFavorite,
+        createdAt: v.createdAt,
+      })),
+    };
+  }
+
+  async batchAddTags(ruleId: string, versionIds: string[], tags: string[]): Promise<{ updated: number }> {
+    const versions = await this.versionRepository.find({
+      where: { id: In(versionIds), ruleId },
+    });
+
+    for (const version of versions) {
+      const existingTags = version.tags || [];
+      version.tags = [...new Set([...existingTags, ...tags])];
+    }
+
+    await this.versionRepository.save(versions);
+    return { updated: versions.length };
   }
 
   async isRuleLocked(ruleId: string): Promise<boolean> {
